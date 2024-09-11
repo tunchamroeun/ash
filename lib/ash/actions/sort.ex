@@ -46,7 +46,7 @@ defmodule Ash.Actions.Sort do
           calc ->
             {module, opts} = calc.calculation
 
-            if module.has_expression?() do
+            if function_exported?(module, :expression, 2) do
               if Ash.DataLayer.data_layer_can?(resource, :expression_calculation_sort) do
                 calculation_sort(
                   field,
@@ -183,7 +183,7 @@ defmodule Ash.Actions.Sort do
             if calc.sortable? do
               {module, opts} = calc.calculation
 
-              if module.has_expression?() do
+              if function_exported?(module, :expression, 2) do
                 if Ash.DataLayer.data_layer_can?(resource, :expression_calculation_sort) do
                   calculation_sort(
                     field,
