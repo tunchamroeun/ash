@@ -1925,7 +1925,7 @@ defmodule Ash.Actions.Read do
     if query.__validated_for_action__ == action.name do
       query
     else
-      if initial_data do
+      if strip_load?(initial_data) do
         load = query.load
         calculations = query.calculations
         aggregates = query.aggregates
@@ -1936,6 +1936,14 @@ defmodule Ash.Actions.Read do
         Ash.Query.for_read(query, action.name, %{}, opts)
       end
     end
+  end
+
+  # The function `keep_read_action_loads_when_loading?` always returns a constant value
+  # because its a compile attr
+  # So dialyzer always complains that `!false` can never be true
+  @dialyzer {:nowarn_function, strip_load?: 1}
+  defp strip_load?(initial_data) do
+    initial_data && !Ash.Actions.Helpers.keep_read_action_loads_when_loading?()
   end
 
   defp validate_multitenancy(query) do
@@ -2830,7 +2838,10 @@ defmodule Ash.Actions.Read do
       if Ash.Actions.Sort.sorting_on_identity?(query) do
         query
       else
-        Ash.Query.sort(query, Ash.Resource.Info.primary_key(query.resource))
+        Ash.Query.sort(
+          query,
+          pagination.stable_sort || Ash.Resource.Info.primary_key(query.resource)
+        )
       end
 
     paginated =
