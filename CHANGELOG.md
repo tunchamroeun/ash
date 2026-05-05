@@ -8,6 +8,111 @@ SPDX-License-Identifier: MIT
 
 <!-- changelog -->
 
+## [v3.24.6](https://github.com/ash-project/ash/compare/v3.24.5...v3.24.6) (2026-05-04)
+
+
+
+
+### Bug Fixes:
+
+* don't use question marks in function names by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.24.5](https://github.com/ash-project/ash/compare/v3.24.4...v3.24.5) (2026-05-03)
+
+
+
+
+### Improvements:
+
+* add `string_starts_with?` function by [@zachdaniel](https://github.com/zachdaniel)
+
+* add `string_ends_with?` function by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.24.4](https://github.com/ash-project/ash/compare/v3.24.3...v3.24.4) (2026-05-01)
+
+
+
+
+### Bug Fixes:
+
+* eager error evaluation in manage_relationship validation (#2687) by [@RetroDev256](https://github.com/RetroDev256) [(#2687)](https://github.com/ash-project/ash/pull/2687)
+
+* dedup resource declarations in domains by [@zachdaniel](https://github.com/zachdaniel)
+
+* Handle calculations on data layers that disallow filters (#2682) by [@Munksgaard](https://github.com/Munksgaard) [(#2682)](https://github.com/ash-project/ash/pull/2682)
+
+* array storage type item constraints (#2681) by JVMartyns [(#2681)](https://github.com/ash-project/ash/pull/2681)
+
+## [v3.24.3](https://github.com/ash-project/ash/compare/v3.24.2...v3.24.3) (2026-04-17)
+
+
+
+
+### Bug Fixes:
+
+* fixes for embedded resources within unions (#2676) by Jesse Williams [(#2676)](https://github.com/ash-project/ash/pull/2676)
+
+* Policy Authorizer strict checking forbid_unless (#2678) by Mike Buhot [(#2678)](https://github.com/ash-project/ash/pull/2678)
+
+* compile error (#2675) by Jesse Williams [(#2675)](https://github.com/ash-project/ash/pull/2675)
+
+* do not ignore missing context on `Ash.PlugHelpers.update_context/2` (#2674) by Maciej Malecki [(#2674)](https://github.com/ash-project/ash/pull/2674)
+
+### Improvements:
+
+* add generate_rest? option to seed_generator (#2591) by robesris [(#2591)](https://github.com/ash-project/ash/pull/2591)
+
+## [v3.24.2](https://github.com/ash-project/ash/compare/v3.24.1...v3.24.2) (2026-04-13)
+
+
+
+
+### Bug Fixes:
+
+* expand the paths in `exists` filters by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.24.1](https://github.com/ash-project/ash/compare/v3.24.0...v3.24.1) (2026-04-12)
+
+
+
+
+### Bug Fixes:
+
+* ensure policie son intermediate resources are respected in `through` by [@zachdaniel](https://github.com/zachdaniel)
+
+* don't apply relationship filters to the source query on `through` by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.24.0](https://github.com/ash-project/ash/compare/v3.23.1...v3.24.0) (2026-04-12)
+
+
+
+
+### Features:
+
+* Relationship Through (#2567) by Kenneth Kostrešević [(#2567)](https://github.com/ash-project/ash/pull/2567)
+
+* add eager_validate? option to manage_relationship/4 (#2663) by [@nallwhy](https://github.com/nallwhy) [(#2663)](https://github.com/ash-project/ash/pull/2663)
+
+### Bug Fixes:
+
+* cast_stored on Keyword type now casts field values through their declared types (#2673) by [@matt-beanland](https://github.com/matt-beanland) [(#2673)](https://github.com/ash-project/ash/pull/2673)
+
+* ensure notifications have all data regardless of select option by [@zachdaniel](https://github.com/zachdaniel)
+
+* complete truncated doc for Ash.Type.coerce/2 by [@zachdaniel](https://github.com/zachdaniel)
+
+* merge operator overloads properly (they are not nested maps) by [@zachdaniel](https://github.com/zachdaniel)
+
+* don't globally set tenant from record metadata when its not present by [@zachdaniel](https://github.com/zachdaniel)
+
+* ensure we use the provided read action in bulk destroy by [@zachdaniel](https://github.com/zachdaniel)
+
+### Improvements:
+
+* usage rules steer towards code interface and actions (#2672) by Kenneth Kostrešević [(#2672)](https://github.com/ash-project/ash/pull/2672)
+
+* support operator overloads that rewrite to custom expressions by [@zachdaniel](https://github.com/zachdaniel)
+
 ## [v3.23.1](https://github.com/ash-project/ash/compare/v3.23.0...v3.23.1) (2026-04-01)
 
 

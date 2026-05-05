@@ -43,10 +43,12 @@ defmodule Ash.Filter do
     Round,
     StartOfDay,
     StringDowncase,
+    StringEndsWith,
     StringJoin,
     StringLength,
     StringPosition,
     StringSplit,
+    StringStartsWith,
     StringTrim,
     Today,
     Type
@@ -94,10 +96,12 @@ defmodule Ash.Filter do
     Type,
     StartOfDay,
     StringDowncase,
+    StringEndsWith,
     StringJoin,
     StringLength,
     StringPosition,
     StringSplit,
+    StringStartsWith,
     StringTrim
   ]
 
@@ -1051,17 +1055,23 @@ defmodule Ash.Filter do
       paths_with_refs
       |> Enum.map(&elem(&1, 0))
       |> Enum.reduce_while({:ok, filters}, fn path, {:ok, filters} ->
-        last_relationship = last_relationship(query.resource, path)
+        expanded_relationships = expand_through_path(query.resource, path)
 
-        add_authorization_path_filter(
-          filters,
-          last_relationship,
-          domain,
-          query,
-          actor,
-          tenant,
-          refs
-        )
+        case Enum.reduce_while(expanded_relationships, {:ok, filters}, fn relationship,
+                                                                          {:ok, filters} ->
+               add_authorization_path_filter(
+                 filters,
+                 relationship,
+                 domain,
+                 query,
+                 actor,
+                 tenant,
+                 refs
+               )
+             end) do
+          {:ok, filters} -> {:cont, {:ok, filters}}
+          {:error, error} -> {:halt, {:error, error}}
+        end
       end)
       |> add_aggregate_path_authorization(
         domain,
@@ -3464,9 +3474,17 @@ defmodule Ash.Filter do
 
   defp add_expression_part_relationship(rel, nested_statement, context, expression) do
     context =
-      context
-      |> Map.update!(:relationship_path, fn path -> path ++ [rel.name] end)
-      |> Map.put(:resource, rel.destination)
+      case Map.get(rel, :through) do
+        through when is_list(through) ->
+          context
+          |> Map.update!(:relationship_path, fn path -> path ++ through end)
+          |> Map.put(:resource, rel.destination)
+
+        _ ->
+          context
+          |> Map.update!(:relationship_path, fn path -> path ++ [rel.name] end)
+          |> Map.put(:resource, rel.destination)
+      end
 
     if is_list(nested_statement) || is_map(nested_statement) do
       case parse_expression(nested_statement, context) do
@@ -3872,7 +3890,7 @@ defmodule Ash.Filter do
              {:func, function_module} when not is_nil(function_module) <-
                {:func, get_function(name, context.resource, context.public?)},
              {:ok, function} <- Function.new(function_module, args) do
-          if Ash.Expr.expr?(function) && !match?(%{__predicate__?: _}, function) do
+          if Ash.Expr.expr?(function) and not is_struct(function, function_module) do
             hydrate_refs(function, context)
           else
             if can_filter_expr?(context, function) do
@@ -4597,7 +4615,19 @@ defmodule Ash.Filter do
         %Ash.Query.Exists{expr: expr, at_path: at_path, path: path} = exists,
         context
       ) do
-    new_resource = Ash.Resource.Info.related(context[:resource], at_path ++ path)
+    expanded_at_path = expand_through_path_names(context[:resource], at_path)
+
+    at_path_resource =
+      if expanded_at_path == [] do
+        context[:resource]
+      else
+        Ash.Resource.Info.related(context[:resource], expanded_at_path)
+      end
+
+    expanded_path = expand_through_path_names(at_path_resource, path)
+
+    new_resource =
+      Ash.Resource.Info.related(context[:resource], expanded_at_path ++ expanded_path)
 
     if new_resource do
       context = %{
@@ -4612,14 +4642,14 @@ defmodule Ash.Filter do
 
       case do_hydrate_refs(expr, context) do
         {:ok, expr} ->
-          {:ok, %{exists | expr: expr}}
+          {:ok, %{exists | expr: expr, at_path: expanded_at_path, path: expanded_path}}
 
         other ->
           other
       end
     else
       {:error,
-       "No related resource at path #{inspect(at_path ++ path)} for #{inspect(context[:resource])}"}
+       "No related resource at path #{inspect(expanded_at_path ++ expanded_path)} for #{inspect(context[:resource])}"}
     end
   end
 
@@ -5171,6 +5201,38 @@ defmodule Ash.Filter do
           false
       end)
     end
+  end
+
+  defp expand_through_path(resource, path) do
+    expand_through_path(resource, path, [])
+  end
+
+  defp expand_through_path(_resource, [], acc), do: Enum.reverse(acc)
+
+  defp expand_through_path(resource, [name | rest], acc) do
+    relationship = Ash.Resource.Info.relationship(resource, name)
+
+    if is_nil(relationship) do
+      raise Ash.Error.Query.NoSuchRelationship,
+        resource: resource,
+        relationship: name
+    end
+
+    case Map.get(relationship, :through) do
+      through when is_list(through) ->
+        nested_rels = expand_through_path(resource, through, [])
+        destination = List.last(nested_rels).destination
+        expand_through_path(destination, rest, Enum.reverse(nested_rels) ++ acc)
+
+      _ ->
+        expand_through_path(relationship.destination, rest, [relationship | acc])
+    end
+  end
+
+  defp expand_through_path_names(resource, path) do
+    resource
+    |> expand_through_path(path)
+    |> Enum.map(& &1.name)
   end
 
   defp last_relationship(resource, list) do

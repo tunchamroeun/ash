@@ -212,6 +212,10 @@ defmodule Ash.Test.Type.AutoTypeTest do
       # map literal
       calculate :card, :auto, expr(%{title: title, score: score, active: active}), public?: true
 
+      # map literal with source keys deliberately not in alphabetic order —
+      # used to assert deterministic (alphabetic-by-atom-name) field ordering.
+      calculate :ordered_card, :auto, expr(%{z: title, a: score, m: active}), public?: true
+
       # struct literal (Ash.Type - embedded resource)
       calculate :address_struct_calc,
                 :auto,
@@ -369,6 +373,16 @@ defmodule Ash.Test.Type.AutoTypeTest do
       assert Keyword.get(fields, :title)[:type] == Ash.Type.String
       assert Keyword.get(fields, :score)[:type] == Ash.Type.Integer
       assert Keyword.get(fields, :active)[:type] == Ash.Type.Boolean
+    end
+
+    test "map literal produces deterministic (alphabetic) field order" do
+      # `:ordered_card` has source keys z, a, m — the test guards against
+      # relying on Erlang map iteration order for small flatmaps, which is
+      # driven by internal atom term ordering and varies between BEAM loads.
+      calc = Ash.Resource.Info.calculation(Post, :ordered_card)
+      fields = calc.constraints[:fields]
+
+      assert Keyword.keys(fields) == [:a, :m, :z]
     end
 
     test "Ash.Type struct literal resolves to the type directly" do
@@ -669,6 +683,61 @@ defmodule Ash.Test.Type.AutoTypeTest do
     test "auto calc referencing another auto calc" do
       post = Ash.Seed.seed!(Post, %{title: "T", body: "B", score: 7, active: true})
       assert Ash.load!(post, :score_calc_copy).score_calc_copy == 7
+    end
+  end
+
+  # ── Regression: is_nil with non-ETS data layers ───────────────────────
+  #
+  # is_nil(attr) as a standalone expression in an :auto calculation used to
+  # crash with `key :arguments not found in: is_nil(attr)` because
+  # Function.IsNil.new/1 delegates to Operator.IsNil which produces an
+  # operator struct (left/right) instead of a function struct (arguments).
+  # When the data layer does NOT support {:filter_expr, _}, resolve_call
+  # tried to access .arguments on the operator, causing a KeyError.
+  # ETS masks this because it accepts all filter expressions.
+
+  defmodule MinimalDataLayer do
+    @moduledoc false
+    use Spark.Dsl.Extension, sections: []
+    @behaviour Ash.DataLayer
+
+    @impl true
+    def can?(_, :read), do: true
+    def can?(_, :nested_expressions), do: true
+    def can?(_, {:filter_expr, _}), do: false
+    def can?(_, _), do: false
+
+    @impl true
+    def resource_to_query(resource, _), do: %{resource: resource}
+
+    @impl true
+    def run_query(_, _), do: {:ok, []}
+  end
+
+  describe "is_nil with data layer that does not support filter_expr" do
+    test "auto type resolves to boolean" do
+      defmodule MinimalResource do
+        use Ash.Resource,
+          domain: Ash.Test.Domain,
+          data_layer: MinimalDataLayer
+
+        actions do
+          default_accept :*
+          defaults [:read]
+        end
+
+        attributes do
+          uuid_primary_key :id
+          attribute :score, :integer, public?: true
+        end
+
+        calculations do
+          calculate :is_score_nil, :auto, expr(is_nil(score)), public?: true
+        end
+      end
+
+      assert Ash.Resource.Info.calculation(MinimalResource, :is_score_nil).type ==
+               Ash.Type.Boolean
     end
   end
 

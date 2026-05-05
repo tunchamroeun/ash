@@ -239,7 +239,7 @@ defmodule Ash.Resource.Dsl do
     Generally speaking, a `has_one` also implies that the destination table is
     unique on that foreign key. To add a uniqueness constraint, you will need
     to add an identity for the foreign key column on the resource which defines
-    the `belongs_to` side of the relationship. See the 
+    the `belongs_to` side of the relationship. See the
     [identities guide](/documentation/topics/resources/identities.md) to learn more.
 
     See the [relationships guide](/documentation/topics/resources/relationships.md) for more.
@@ -276,6 +276,12 @@ defmodule Ash.Resource.Dsl do
       has_many :definitions, DictionaryDefinition do
         source_attribute :text
         destination_attribute :word_text
+      end
+      """,
+      """
+      # Through relationship - traverse a path of existing relationships
+      has_many :linked_posts, Post do
+        through [:post_links, :destination]
       end
       """
     ],
@@ -1768,6 +1774,7 @@ defmodule Ash.Resource.Dsl do
     Ash.Resource.Verifiers.VerifyFilterExpressions,
     Ash.Resource.Verifiers.ValidateAggregateField,
     Ash.Resource.Verifiers.ValidateRelationshipAttributes,
+    Ash.Resource.Verifiers.ValidateThroughRelationships,
     Ash.Resource.Verifiers.NoReservedFieldNames,
     Ash.Resource.Verifiers.ValidateAccept,
     Ash.Resource.Verifiers.ValidateActionTypesSupported,

@@ -10,7 +10,7 @@ defmodule Ash.MixProject do
   A declarative, extensible framework for building Elixir applications.
   """
 
-  @version "3.23.1"
+  @version "3.24.6"
 
   def project do
     [
@@ -358,7 +358,7 @@ defmodule Ash.MixProject do
       ],
       licenses: ["MIT"],
       files: ~w(lib priv .formatter.exs mix.exs README* LICENSE*
-      CHANGELOG* usage-rules.md usage-rules),
+      CHANGELOG* usage-rules.md usage-rules documentation .github/CONTRIBUTING.md),
       links: %{
         "GitHub" => "https://github.com/ash-project/ash",
         "Changelog" => "https://github.com/ash-project/ash/blob/main/CHANGELOG.md",
