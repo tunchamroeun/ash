@@ -10,7 +10,7 @@ defmodule Ash.MixProject do
   A declarative, extensible framework for building Elixir applications.
   """
 
-  @version "3.24.6"
+  @version "3.24.7"
 
   def project do
     [
@@ -387,7 +387,7 @@ defmodule Ash.MixProject do
       # Used by the ETS data layer
       {:ets, "~> 0.8"},
       # Data & types
-      {:decimal, "~> 2.0"},
+      {:decimal, "~> 2.0 or ~> 3.0"},
       {:jason, ">= 1.0.0"},
       # Observability
       {:telemetry, "~> 1.1"},
