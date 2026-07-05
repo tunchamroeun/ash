@@ -161,6 +161,9 @@ defmodule Ash.Resource.Dsl do
     describe: """
     Declares a non writable, non-nil, primary key column of type `uuid_v7`, which defaults to `Ash.UUIDv7.generate/0`.
 
+    `Ash.UUIDv7.generate/0` produces strictly monotonic (per node) version 7 UUIDs via `Ecto.UUID`,
+    making it a good choice of primary key for new resources.
+
     Accepts all the same options as `d:Ash.Resource.Dsl.attributes.attribute`, except for `allow_nil?`, but it sets
     the following different defaults:
 
@@ -1097,6 +1100,11 @@ defmodule Ash.Resource.Dsl do
       define?: [
         type: :boolean,
         doc: "Whether or not to define the code interface in the resource."
+      ],
+      namespace: [
+        type: :atom,
+        doc:
+          "Default module on which to generate this resource's code interface functions instead of the resource itself. The given name is concatenated to the resource module. Individual `define`/`define_calculation` entries can override with their own `:namespace` option."
       ]
     ],
     entities: [

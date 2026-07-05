@@ -1100,14 +1100,21 @@ defmodule Ash.Filter do
          filters,
          last_relationship,
          domain,
-         _query,
+         query,
          actor,
          tenant,
          _refs,
          base_related_query \\ nil,
          _aggregate? \\ false
        ) do
-    case relationship_query(last_relationship, domain, actor, tenant, base_related_query) do
+    case relationship_query(
+           last_relationship,
+           domain,
+           actor,
+           tenant,
+           base_related_query,
+           %{shared: query.context[:shared]}
+         ) do
       %{errors: []} = related_query ->
         if filters[{last_relationship.source, last_relationship.name, related_query.action.name}] do
           {:cont, {:ok, filters}}
@@ -1176,6 +1183,8 @@ defmodule Ash.Filter do
          refs,
          authorize?
        ) do
+    shared = %{shared: query.context[:shared]}
+
     refs
     |> Enum.flat_map(fn {_path, refs} ->
       refs
@@ -1190,12 +1199,17 @@ defmodule Ash.Filter do
     |> Enum.concat(aggregates)
     |> Enum.filter(& &1.authorize?)
     |> Enum.reduce_while({:ok, path_filters}, fn aggregate, {:ok, filters} ->
+      aggregate_query = Ash.Query.set_context(aggregate.query, shared)
+      aggregate = %{aggregate | query: aggregate_query}
+
       if Map.get(aggregate, :related?, true) do
         aggregate.relationship_path
         |> :lists.droplast()
         |> Ash.Query.Aggregate.subpaths()
         |> Enum.reduce_while({:ok, filters}, fn subpath, {:ok, filters} ->
-          last_relationship = last_relationship(query.resource, subpath)
+          # Path is relative to the aggregate's own source, which differs from
+          # `query.resource` when this is a nested aggregate's inner aggregate.
+          last_relationship = last_relationship(aggregate.resource, subpath)
 
           add_authorization_path_filter(
             filters,
@@ -1211,13 +1225,14 @@ defmodule Ash.Filter do
               %{},
               actor: actor,
               tenant: tenant,
-              authorize?: authorize?
+              authorize?: authorize?,
+              context: shared
             ),
             true
           )
         end)
       else
-        case Ash.can(aggregate.query, actor,
+        case Ash.can(aggregate_query, actor,
                run_queries?: false,
                pre_flight?: false,
                alter_source?: true,
@@ -1490,7 +1505,7 @@ defmodule Ash.Filter do
     end
   end
 
-  defp relationship_query(relationship, domain, actor, tenant, base) do
+  defp relationship_query(relationship, domain, actor, tenant, base, source_context \\ %{}) do
     base_query = base || Ash.Query.new(relationship.destination)
     domain = relationship.domain || domain
 
@@ -1501,6 +1516,7 @@ defmodule Ash.Filter do
     query =
       relationship.destination
       |> Ash.Query.set_context(relationship.context)
+      |> Ash.Query.set_context(source_context)
       |> Ash.Query.sort(relationship.sort, prepend?: true)
 
     if query.__validated_for_action__ == action do
@@ -1510,7 +1526,8 @@ defmodule Ash.Filter do
         actor: actor,
         authorize?: true,
         tenant: tenant,
-        domain: domain
+        domain: domain,
+        context: source_context
       )
     end
   end
@@ -1876,7 +1893,7 @@ defmodule Ash.Filter do
 
   defp do_run_other_data_layer_filters(other, _domain, _resource, _data), do: {:ok, other}
 
-  defp split_expression_by_relationship_path(%{expression: expression}, path) do
+  defp split_expression_by_relationship_path(%__MODULE__{expression: expression}, path) do
     split_expression_by_relationship_path(expression, path)
   end
 
@@ -2723,12 +2740,6 @@ defmodule Ash.Filter do
       %{__predicate__?: _, arguments: args} ->
         Enum.flat_map(
           args,
-          &do_list_refs(&1, true, false, expand_calculations?, expand_get_path?)
-        )
-
-      value when is_list(value) ->
-        Enum.flat_map(
-          value,
           &do_list_refs(&1, true, false, expand_calculations?, expand_get_path?)
         )
 
@@ -4397,16 +4408,6 @@ defmodule Ash.Filter do
     resolve_call(call, context)
   end
 
-  def do_hydrate_refs(%{__predicate__?: _, left: left, right: right} = expr, context) do
-    with {:ok, left} <- do_hydrate_refs(left, context),
-         {:ok, right} <- do_hydrate_refs(right, context) do
-      {:ok, %{expr | left: left, right: right}}
-    else
-      other ->
-        other
-    end
-  end
-
   def do_hydrate_refs(
         %{
           __predicate__?: _,
@@ -4474,6 +4475,16 @@ defmodule Ash.Filter do
 
       {:error, error} ->
         {:error, error}
+    end
+  end
+
+  def do_hydrate_refs(%{__predicate__?: _, left: left, right: right} = expr, context) do
+    with {:ok, left} <- do_hydrate_refs(left, context),
+         {:ok, right} <- do_hydrate_refs(right, context) do
+      {:ok, %{expr | left: left, right: right}}
+    else
+      other ->
+        other
     end
   end
 
@@ -4589,6 +4600,13 @@ defmodule Ash.Filter do
     do: {:ok, this}
 
   def do_hydrate_refs(
+        %Ash.Query.Exists{related?: false, resource: nil} = exists,
+        _context
+      ) do
+    {:error, exists_unrelated_resource_error(exists)}
+  end
+
+  def do_hydrate_refs(
         %Ash.Query.Exists{expr: expr, related?: false, resource: resource} = exists,
         context
       ) do
@@ -4615,48 +4633,50 @@ defmodule Ash.Filter do
         %Ash.Query.Exists{expr: expr, at_path: at_path, path: path} = exists,
         context
       ) do
-    expanded_at_path = expand_through_path_names(context[:resource], at_path)
+    resource = context[:resource]
 
-    at_path_resource =
-      if expanded_at_path == [] do
-        context[:resource]
-      else
-        Ash.Resource.Info.related(context[:resource], expanded_at_path)
-      end
+    case validate_exists_paths(exists, resource, at_path, path) do
+      :ok ->
+        expanded_at_path = expand_through_path_names(resource, at_path)
 
-    expanded_path = expand_through_path_names(at_path_resource, path)
+        at_path_resource =
+          if expanded_at_path == [] do
+            resource
+          else
+            Ash.Resource.Info.related(resource, expanded_at_path)
+          end
 
-    new_resource =
-      Ash.Resource.Info.related(context[:resource], expanded_at_path ++ expanded_path)
+        expanded_path = expand_through_path_names(at_path_resource, path)
 
-    if new_resource do
-      context = %{
-        resource: new_resource,
-        root_resource: new_resource,
-        parent_stack: [context[:root_resource] | context[:parent_stack] || []],
-        relationship_path: [],
-        public?: context[:public?],
-        input?: context[:input?],
-        data_layer: Ash.DataLayer.data_layer(new_resource)
-      }
+        new_resource =
+          Ash.Resource.Info.related(resource, expanded_at_path ++ expanded_path)
 
-      case do_hydrate_refs(expr, context) do
-        {:ok, expr} ->
-          {:ok, %{exists | expr: expr, at_path: expanded_at_path, path: expanded_path}}
+        if new_resource do
+          context = %{
+            resource: new_resource,
+            root_resource: new_resource,
+            parent_stack: [context[:root_resource] | context[:parent_stack] || []],
+            relationship_path: [],
+            public?: context[:public?],
+            input?: context[:input?],
+            data_layer: Ash.DataLayer.data_layer(new_resource)
+          }
 
-        other ->
-          other
-      end
-    else
-      {:error,
-       "No related resource at path #{inspect(expanded_at_path ++ expanded_path)} for #{inspect(context[:resource])}"}
-    end
-  end
+          case do_hydrate_refs(expr, context) do
+            {:ok, expr} ->
+              {:ok, %{exists | expr: expr, at_path: expanded_at_path, path: expanded_path}}
 
-  def do_hydrate_refs(%__MODULE__{expression: expression} = filter, context) do
-    case do_hydrate_refs(expression, context) do
-      {:ok, expression} ->
-        {:ok, %{filter | expression: expression}}
+            other ->
+              other
+          end
+        else
+          exists_related_hydrate_error(
+            exists,
+            resource,
+            expanded_at_path,
+            expanded_path
+          )
+        end
 
       {:error, error} ->
         {:error, error}
@@ -4846,8 +4866,6 @@ defmodule Ash.Filter do
     %{ref | relationship_path: to_add ++ relationship_path}
   end
 
-  defp add_to_ref_path(other, _), do: other
-
   defp parse_and_join([statement | statements], op, context) do
     case parse_expression(statement, context) do
       {:ok, nested_expression} ->
@@ -4967,7 +4985,7 @@ defmodule Ash.Filter do
                             attribute: attr,
                             relationship_path: context[:relationship_path] || [],
                             resource: context.resource,
-                            input?: true
+                            input?: context[:input?] || false
                           },
                           at_path
                         ]
@@ -4977,7 +4995,7 @@ defmodule Ash.Filter do
                         attribute: attr,
                         relationship_path: context[:relationship_path] || [],
                         resource: context.resource,
-                        input?: true
+                        input?: context[:input?] || false
                       }
                     end
 
@@ -5005,7 +5023,7 @@ defmodule Ash.Filter do
                         attribute: attr,
                         relationship_path: context[:relationship_path] || [],
                         resource: context.resource,
-                        input?: true
+                        input?: context[:input?] || false
                       },
                       at_path
                     ]
@@ -5015,7 +5033,7 @@ defmodule Ash.Filter do
                     attribute: attr,
                     relationship_path: context[:relationship_path] || [],
                     resource: context.resource,
-                    input?: true
+                    input?: context[:input?] || false
                   }
                 end
 
@@ -5233,6 +5251,97 @@ defmodule Ash.Filter do
     resource
     |> expand_through_path(path)
     |> Enum.map(& &1.name)
+  end
+
+  defp exists_related_hydrate_error(exists, resource, at_path, path) do
+    full_path = at_path ++ path
+
+    if exists_invalid_path?(full_path) do
+      {:error, exists_invalid_syntax_error(exists, resource)}
+    else
+      {:error, exists_invalid_relationship_path_error(exists, resource, full_path)}
+    end
+  end
+
+  defp validate_exists_paths(exists, resource, at_path, path) do
+    cond do
+      exists_invalid_path?(at_path) or exists_invalid_path?(path) ->
+        {:error, exists_invalid_syntax_error(exists, resource)}
+
+      not exists_relationship_path_valid?(resource, at_path) ->
+        {:error, exists_invalid_relationship_path_error(exists, resource, at_path ++ path)}
+
+      true ->
+        at_path_resource =
+          if at_path == [] do
+            resource
+          else
+            Ash.Resource.Info.related(resource, at_path)
+          end
+
+        if exists_relationship_path_valid?(at_path_resource, path) do
+          :ok
+        else
+          {:error, exists_invalid_relationship_path_error(exists, resource, at_path ++ path)}
+        end
+    end
+  end
+
+  defp exists_relationship_path_valid?(_resource, []), do: true
+
+  defp exists_relationship_path_valid?(resource, [name | rest]) do
+    case Ash.Resource.Info.relationship(resource, name) do
+      nil -> false
+      %{destination: destination} -> exists_relationship_path_valid?(destination, rest)
+    end
+  end
+
+  defp exists_invalid_path?(path) when is_list(path) do
+    operators =
+      Ash.Query.Operator.operator_symbols()
+      |> Kernel.++([:and, :or, :not])
+      |> MapSet.new()
+
+    Enum.any?(path, &MapSet.member?(operators, &1))
+  end
+
+  defp exists_invalid_syntax_error(%Ash.Query.Exists{} = exists, resource) do
+    """
+    Invalid `exists/2` expression on #{inspect(resource)}.
+
+    The first argument to `exists/2` must be a relationship (or resource module), and the second must be a filter condition.
+
+    If you wrote something like `exists(foo.bar == "bar")`, use `exists(foo, bar == "bar")` instead.
+
+    Expression: #{inspect(exists)}
+    """
+    |> String.trim()
+  end
+
+  defp exists_invalid_relationship_path_error(%Ash.Query.Exists{} = exists, resource, path) do
+    """
+    Invalid `exists/2` expression on #{inspect(resource)}.
+
+    Could not find a related resource at path #{inspect(path)}.
+
+    Ensure the relationship name is spelled correctly. The correct syntax is `exists(relationship, condition)`.
+
+    Expression: #{inspect(exists)}
+    """
+    |> String.trim()
+  end
+
+  defp exists_unrelated_resource_error(%Ash.Query.Exists{} = exists) do
+    """
+    Invalid `exists/2` expression.
+
+    Could not determine the resource for an unrelated `exists/2` expression.
+
+    The first argument must be a resource module, e.g. `exists(MyApp.User, condition)`.
+
+    Expression: #{inspect(exists)}
+    """
+    |> String.trim()
   end
 
   defp last_relationship(resource, list) do

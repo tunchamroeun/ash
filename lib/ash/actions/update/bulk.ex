@@ -18,6 +18,7 @@ defmodule Ash.Actions.Update.Bulk do
   end
 
   def run(domain, %Ash.Query{} = query, action, input, opts, not_atomic_reason) do
+    opts = Ash.Actions.Helpers.apply_scope_to_opts(opts)
     action_name = if is_atom(action), do: action, else: action.name
 
     span_type =
@@ -474,6 +475,7 @@ defmodule Ash.Actions.Update.Bulk do
   end
 
   def run(domain, stream, action, input, opts, not_atomic_reason) do
+    opts = Ash.Actions.Helpers.apply_scope_to_opts(opts)
     resource = opts[:resource]
 
     opts = set_strategy(opts, resource, Keyword.get(opts, :input_was_stream?, true))
@@ -1494,7 +1496,7 @@ defmodule Ash.Actions.Update.Bulk do
     manual_action_can_bulk? =
       case action.manual do
         {mod, _opts} ->
-          function_exported?(mod, :bulk_update, 3)
+          Code.ensure_loaded?(mod) and function_exported?(mod, :bulk_update, 3)
 
         _ ->
           false
@@ -2263,7 +2265,7 @@ defmodule Ash.Actions.Update.Bulk do
         0
       end
 
-    if max_concurrency && max_concurrency > 1 do
+    if max_concurrency > 1 do
       ash_context = Ash.ProcessHelpers.get_context_for_transfer(opts)
 
       Task.async_stream(
@@ -2703,7 +2705,7 @@ defmodule Ash.Actions.Update.Bulk do
                     [] -> %{}
                   end
 
-                if function_exported?(mod, :bulk_update, 3) do
+                if Code.ensure_loaded?(mod) and function_exported?(mod, :bulk_update, 3) do
                   Ash.Resource.ManualUpdate.bulk_update(
                     mod,
                     batch,
@@ -2962,7 +2964,7 @@ defmodule Ash.Actions.Update.Bulk do
           resource :: Ash.Resource.t(),
           domain :: Ash.Domain.t(),
           base_changeset :: Ash.Changeset.t()
-        ) :: [Ash.Resource.record() | {:error, term()}]
+        ) :: [Ash.Resource.Record.t() | {:error, term()}]
   defp process_results(
          tagged_results,
          opts,

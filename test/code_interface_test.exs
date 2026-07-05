@@ -73,6 +73,7 @@ defmodule Ash.Test.CodeInterfaceTest do
       define :create, args: [{:optional, :first_name}]
       define :insert, action: :create
       define :hello, args: [:name]
+      define :user_exists?, args: [:first_name]
 
       define :update_by_id_map do
         action :update_by_id_without_filter
@@ -191,6 +192,19 @@ defmodule Ash.Test.CodeInterfaceTest do
         run(fn input, _ ->
           {:ok, "Hello #{input.arguments.name}"}
         end)
+      end
+
+      action :user_exists?, :boolean do
+        argument :first_name, :string, allow_nil?: false
+
+        run fn input, _ ->
+          exists =
+            User
+            |> Ash.Query.filter_input(first_name: input.arguments.first_name)
+            |> Ash.exists?()
+
+          {:ok, exists}
+        end
       end
 
       action :hello_actor, :string do
@@ -391,6 +405,44 @@ defmodule Ash.Test.CodeInterfaceTest do
     end
   end
 
+  describe "predicate code interfaces" do
+    test "?-suffixed interfaces return a bare boolean" do
+      User.create!("alice")
+
+      assert User.user_exists?("alice") == true
+      assert User.user_exists?("brian") == false
+    end
+
+    test "?-suffixed interfaces do not return ok/error tuples" do
+      User.create!("alice")
+
+      refute match?({:ok, _}, User.user_exists?("alice"))
+      refute match?({:error, _}, User.user_exists?("brian"))
+    end
+
+    test "?-suffixed interfaces generate a tuple-returning function without ?" do
+      User.create!("alice")
+
+      assert User.user_exists("alice") == {:ok, true}
+      assert User.user_exists("brian") == {:ok, false}
+    end
+
+    test "?-suffixed interfaces do not generate a ! variant" do
+      assert function_exported?(User, :user_exists, 1)
+      assert function_exported?(User, :user_exists?, 1)
+      refute function_exported?(User, :user_exists!, 1)
+      refute function_exported?(User, :"user_exists?!", 1)
+    end
+
+    test "authorization helpers do not double the question mark" do
+      assert function_exported?(User, :can_user_exists?, 2)
+      refute function_exported?(User, :"can_user_exists??", 2)
+
+      assert {:ok, true} == User.can_user_exists(nil, "alice")
+      assert User.can_user_exists?(nil, "alice") == true
+    end
+  end
+
   describe "read actions" do
     test "have a helper methods to produce queries" do
       assert %Ash.Query{action: %{name: :read}} = User.query_to_read_users()
@@ -413,6 +465,28 @@ defmodule Ash.Test.CodeInterfaceTest do
       assert {:ok, true} == User.can_get_by_id(nil, "some uuid")
       assert User.can_read_users?(nil)
       assert User.can_get_by_id?(nil, "some uuid")
+    end
+  end
+
+  describe "code interface get_by validation" do
+    test "validates lookup values like action get_by before filtering" do
+      invalid_id = "not a uuid"
+
+      query = User.query_to_get_user(invalid_id)
+
+      assert [%Ash.Error.Query.InvalidArgument{field: :id, message: "is invalid"}] =
+               query.errors
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Query.InvalidArgument{field: :id}]}} =
+               User.get_user(invalid_id)
+
+      assert_raise Ash.Error.Invalid, fn ->
+        User.get_user!(invalid_id)
+      end
+
+      by_id_query = Ash.Query.for_read(User, :by_id, %{id: invalid_id})
+
+      assert [%Ash.Error.Query.InvalidArgument{field: :id}] = by_id_query.errors
     end
   end
 

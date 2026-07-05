@@ -8,6 +8,302 @@ SPDX-License-Identifier: MIT
 
 <!-- changelog -->
 
+## [v3.29.3](https://github.com/ash-project/ash/compare/v3.29.2...v3.29.3) (2026-06-23)
+
+
+
+
+### Bug Fixes:
+
+* scrub private arguments w/ string values by [@zachdaniel](https://github.com/zachdaniel)
+
+Fixes CVE-2026-55736
+
+## [v3.29.2](https://github.com/ash-project/ash/compare/v3.29.1...v3.29.2) (2026-06-22)
+
+
+
+
+### Bug Fixes:
+
+* properly retain override messages on list of errors by [@zachdaniel](https://github.com/zachdaniel)
+
+* narrow input/2 spec to no_return for resources without actions (#2758) by diogomrts [(#2758)](https://github.com/ash-project/ash/pull/2758)
+
+* respect actor from scope: in bulk actions under require_actor? (#2757) by [@emadshaaban92](https://github.com/emadshaaban92) [(#2757)](https://github.com/ash-project/ash/pull/2757)
+
+* support uuidv7 generation when Ecto isn't started by [@zachdaniel](https://github.com/zachdaniel)
+
+* ensure calc context is added to m2m through query by [@zachdaniel](https://github.com/zachdaniel)
+
+### Improvements:
+
+* add explanatory comment on backwards compat config by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.29.1](https://github.com/ash-project/ash/compare/v3.29.0...v3.29.1) (2026-06-14)
+
+
+
+
+### Bug Fixes:
+
+* handle all hook types in update_many by [@zachdaniel](https://github.com/zachdaniel)
+
+* require primary keys explicitly as update_many targets by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.29.0](https://github.com/ash-project/ash/compare/v3.28.0...v3.29.0) (2026-06-14)
+
+
+
+
+### Features:
+
+* add `Ash.update_many/4` by Zach Daniel
+
+### Bug Fixes:
+
+* look up field policies by calc_name when authorizing calculation sorts (#2754) by Jesse Williams [(#2754)](https://github.com/ash-project/ash/pull/2754)
+
+* ensure modules are loaded before optional callback checks (#2753) by Vasilis Spilka
+
+* relate_actor with field: raises BadMapError for belongs_to (#2751) by diogomrts [(#2751)](https://github.com/ash-project/ash/pull/2751)
+
+### Improvements:
+
+* set `upsert_action` metadata in ETS and Mnesia by Zach Daniel
+
+* allow partial identity join sorting (#2746) by Jechol Lee [(#2746)](https://github.com/ash-project/ash/pull/2746)
+
+* Make attribute_in delegate to one_of (#1713) (#2748) by nashjar000 [(#2748)](https://github.com/ash-project/ash/pull/2748)
+
+* Prompt to add use Ash.Domain when module exists but is not a domain (#2744) by gixtrem [(#2744)](https://github.com/ash-project/ash/pull/2744)
+
+## [v3.28.0](https://github.com/ash-project/ash/compare/v3.27.8...v3.28.0) (2026-06-11)
+
+
+
+
+### Features:
+
+* Add byte_size validation (#2741) by charlieaten [(#2741)](https://github.com/ash-project/ash/pull/2741)
+
+### Bug Fixes:
+
+* use proper embedded casting for fields in composite types by [@zachdaniel](https://github.com/zachdaniel)
+
+* preserve changeset context in `generate_many/2` (#2742) by [@nallwhy](https://github.com/nallwhy) [(#2742)](https://github.com/ash-project/ash/pull/2742)
+
+* validate multitenancy attribute by [@zachdaniel](https://github.com/zachdaniel)
+
+* pass the index to Ash.DataLayer.upsert so it is included in the sql statement. (#2740) by David Corwin [(#2740)](https://github.com/ash-project/ash/pull/2740)
+
+### Improvements:
+
+* verify types before codes run, catching unspecified or unusable types. (#2739) by torazar [(#2739)](https://github.com/ash-project/ash/pull/2739)
+
+## [v3.27.8](https://github.com/ash-project/ash/compare/v3.27.7...v3.27.8) (2026-06-05)
+
+
+
+
+### Bug Fixes:
+
+* crash loading nested aggregate over a multi-hop inner aggregate (#2732) by [@joshprice](https://github.com/joshprice) [(#2732)](https://github.com/ash-project/ash/pull/2732)
+
+* propagate include_source? from union to inner embedded type constraints (#2716) by [@Munksgaard](https://github.com/Munksgaard) [(#2716)](https://github.com/ash-project/ash/pull/2716)
+
+* auto-detect argument vs attribute in validation  (#2714) by [@ThomaseLucas](https://github.com/ThomaseLucas) [(#2714)](https://github.com/ash-project/ash/pull/2714)
+
+* ensure lock is passed in read_one/read_first (#2711) by Alt-iOS [(#2711)](https://github.com/ash-project/ash/pull/2711)
+
+* propagate parent query's context.shared into aggregate authorization filters (#2730) by [@nallwhy](https://github.com/nallwhy) [(#2730)](https://github.com/ash-project/ash/pull/2730)
+
+* Error when passing in {:ok, []} to Ash.load (#2722) by [@cheerfulstoic](https://github.com/cheerfulstoic) [(#2722)](https://github.com/ash-project/ash/pull/2722)
+
+* match `ci_string` join keys case-insensitively when loading `many_to_many` relationships (#2731) by sevenseacat [(#2731)](https://github.com/ash-project/ash/pull/2731)
+
+### Improvements:
+
+* switch to uuidv7 ecto's generator (#2734) by Kenneth Kostrešević [(#2734)](https://github.com/ash-project/ash/pull/2734)
+
+* Include all constraints in `Ash.Type.Decimal.generator/1` (#2717) by David Corwin [(#2717)](https://github.com/ash-project/ash/pull/2717)
+
+## [v3.27.7](https://github.com/ash-project/ash/compare/v3.27.6...v3.27.7) (2026-06-01)
+
+
+
+
+### Bug Fixes:
+
+* fix passing source query arguments down to hydrate refs on relationship filter expressions by Rutgerdj [(#2728)](https://github.com/ash-project/ash/pull/2728)
+
+### Improvements:
+
+* allow for calcs/aggs in pubsub topics by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.27.6](https://github.com/ash-project/ash/compare/v3.27.5...v3.27.6) (2026-05-28)
+
+
+
+
+### Bug Fixes:
+
+* do not consider all maps to be input refs by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.27.5](https://github.com/ash-project/ash/compare/v3.27.4...v3.27.5) (2026-05-28)
+
+
+
+
+### Bug Fixes:
+
+* do not consider all maps to be input refs by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.27.4](https://github.com/ash-project/ash/compare/v3.27.3...v3.27.4) (2026-05-28)
+
+
+
+
+### Bug Fixes:
+
+* don't force coerction of untyped expressions by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.27.3](https://github.com/ash-project/ash/compare/v3.27.2...v3.27.3) (2026-05-28)
+
+
+
+
+### Bug Fixes:
+
+* undo incorrect newtype constraint merging by [@zachdaniel](https://github.com/zachdaniel)
+
+* use better signal for overload type casting by [@zachdaniel](https://github.com/zachdaniel)
+
+* detect recursive types at compile time by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.27.2](https://github.com/ash-project/ash/compare/v3.27.1...v3.27.2) (2026-05-27)
+
+
+
+
+### Bug Fixes:
+
+* distinguish active & passive operator overloads by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.27.1](https://github.com/ash-project/ash/compare/v3.27.0...v3.27.1) (2026-05-27)
+
+
+
+
+### Bug Fixes:
+
+* add missing overload detection branch by [@zachdaniel](https://github.com/zachdaniel)
+
+* loosen usec change, allow coercing but not matching by [@zachdaniel](https://github.com/zachdaniel)
+
+* retain subtype constraints when coercing new types by [@zachdaniel](https://github.com/zachdaniel)
+
+* use correct detection for overloads as "last resort typecasts" by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.27.0](https://github.com/ash-project/ash/compare/v3.26.0...v3.27.0) (2026-05-26)
+
+
+
+
+### Features:
+
+* apply field policies on composite types by [@zachdaniel](https://github.com/zachdaniel)
+
+* Add new type callback for `to_simple_equality_comparable` (#2719) by sevenseacat [(#2719)](https://github.com/ash-project/ash/pull/2719)
+
+### Bug Fixes:
+
+* don't coerce or match datetimes to microseconds incorrectly by [@zachdaniel](https://github.com/zachdaniel)
+
+* handle arrays in `select_selected` by [@zachdaniel](https://github.com/zachdaniel)
+
+### Improvements:
+
+* add `functions` option to code interfaces by [@zachdaniel](https://github.com/zachdaniel)
+
+* expose required? on manifest Argument inputs (#2720) by [@Torkan](https://github.com/Torkan) [(#2720)](https://github.com/ash-project/ash/pull/2720)
+
+## [v3.26.0](https://github.com/ash-project/ash/compare/v3.25.2...v3.26.0) (2026-05-22)
+
+
+
+
+### Features:
+
+* add manual keyset pagination delegated to data layer (#2686) by Rekkice [(#2686)](https://github.com/ash-project/ash/pull/2686)
+
+* manifest: preserve field and union member descriptions (#2707) by [@Torkan](https://github.com/Torkan) [(#2707)](https://github.com/ash-project/ash/pull/2707)
+
+### Bug Fixes:
+
+* don't hide private fields in filters when the policy is to show them by [@zachdaniel](https://github.com/zachdaniel)
+
+* include multitenancy attribute when `all_tenants?: false` by [@zachdaniel](https://github.com/zachdaniel)
+
+### Improvements:
+
+* add `namespace` option for code interfaces by [@zachdaniel](https://github.com/zachdaniel)
+
+* Allow `can` to not log policy breakdown (#2708) by sezaru [(#2708)](https://github.com/ash-project/ash/pull/2708)
+
+### Performance Improvements:
+
+* avoid related-record read in relate_actor for belongs_to (#2709) by [@emadshaaban92](https://github.com/emadshaaban92) [(#2709)](https://github.com/ash-project/ash/pull/2709)
+
+## [v3.25.2](https://github.com/ash-project/ash/compare/v3.25.1...v3.25.2) (2026-05-18)
+
+
+
+
+### Bug Fixes:
+
+* place embedded resources into `types` by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.25.1](https://github.com/ash-project/ash/compare/v3.25.0...v3.25.1) (2026-05-18)
+
+
+
+
+### Bug Fixes:
+
+* merge action arguments and accepted attributes into unified `inputs` list by [@zachdaniel](https://github.com/zachdaniel)
+
+### Improvements:
+
+* support custom error messages in policies by [@zachdaniel](https://github.com/zachdaniel)
+
+## [v3.25.0](https://github.com/ash-project/ash/compare/v3.24.7...v3.25.0) (2026-05-17)
+
+
+
+
+### Features:
+
+* add filtering and sorting to manifest (#2704) by [@Torkan](https://github.com/Torkan) [(#2704)](https://github.com/ash-project/ash/pull/2704)
+
+* `Ash.Info.manifest` for code generation basis (#2703) by [@Torkan](https://github.com/Torkan) [(#2703)](https://github.com/ash-project/ash/pull/2703)
+
+### Bug Fixes:
+
+* manifest: pass real resource to data_layer.functions/1 (#2706) by [@Torkan](https://github.com/Torkan) [(#2706)](https://github.com/ash-project/ash/pull/2706)
+
+* Manual relationships select missing (#2700) by Kenneth Kostrešević [(#2700)](https://github.com/ash-project/ash/pull/2700)
+
+* add query context to bulk destroy (#2699) by danielatdpg [(#2699)](https://github.com/ash-project/ash/pull/2699)
+
+* add code interface validation hint for options (#2697) by febarnett3 [(#2697)](https://github.com/ash-project/ash/pull/2697)
+
+* preserve all errors in Required dedupe accumulator (#2692) by sevenseacat [(#2692)](https://github.com/ash-project/ash/pull/2692)
+
+### Improvements:
+
+* support filter checks on create actions by [@zachdaniel](https://github.com/zachdaniel)
+
 ## [v3.24.7](https://github.com/ash-project/ash/compare/v3.24.6...v3.24.7) (2026-05-05)
 
 

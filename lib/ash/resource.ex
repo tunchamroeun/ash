@@ -10,7 +10,10 @@ defmodule Ash.Resource do
   """
 
   @type t :: module
-  @type record :: struct()
+
+  if String.to_integer(System.otp_release()) < 29 do
+    @type record :: Ash.Resource.Record.t()
+  end
 
   use Spark.Dsl,
     single_extension_kinds: [:data_layer],
@@ -309,7 +312,27 @@ defmodule Ash.Resource do
           end
 
           require Ash.CodeInterface
-          Ash.CodeInterface.define_interface(domain, __MODULE__)
+
+          definitions =
+            Ash.Resource.Info.interfaces(__MODULE__) ++
+              Ash.Resource.Info.calculation_interfaces(__MODULE__)
+
+          {host_definitions, by_namespace} =
+            Ash.CodeInterface.split_definitions_by_namespace(
+              definitions,
+              __MODULE__,
+              Ash.Resource.Info.code_interface_namespace(__MODULE__)
+            )
+
+          Ash.CodeInterface.define_interface(domain, __MODULE__, host_definitions)
+
+          Ash.CodeInterface.create_namespace_modules(
+            __MODULE__,
+            domain,
+            __MODULE__,
+            by_namespace,
+            __ENV__
+          )
         end
       end
 
@@ -396,28 +419,40 @@ defmodule Ash.Resource do
       @doc """
       Same as `input/1`, except restricts the keys to values accepted by the action provided.
       """
-      @spec input(values :: map | Keyword.t(), action :: atom) :: map | no_return
-      def input(opts, action) do
-        case Map.fetch(@arguments_by_action, action) do
-          :error ->
-            raise ArgumentError, message: "No such action #{inspect(action)}"
+      # when there are no actions, `@arguments_by_action` is an empty map literal,
+      # which the type system can prove `Map.fetch/2` will always fail on, producing
+      # a warning everywhere such a resource is defined. In that case the function
+      # only ever raises, so its spec must be `no_return` (a `map` success typing
+      # would never match, producing a Dialyzer `invalid_contract` warning).
+      if Enum.empty?(@arguments_by_action) do
+        @spec input(values :: map | Keyword.t(), action :: atom) :: no_return
+        def input(_opts, action) do
+          raise ArgumentError, message: "No such action #{inspect(action)}"
+        end
+      else
+        @spec input(values :: map | Keyword.t(), action :: atom) :: map | no_return
+        def input(opts, action) do
+          case Map.fetch(@arguments_by_action, action) do
+            :error ->
+              raise ArgumentError, message: "No such action #{inspect(action)}"
 
-          {:ok, args} ->
-            action = Ash.Resource.Info.action(__MODULE__, action)
+            {:ok, _args} ->
+              action = Ash.Resource.Info.action(__MODULE__, action)
 
-            Map.new(opts, fn {key, value} ->
-              if key in action.accept do
-                {key, value}
-              else
-                raise KeyError, key: key
-              end
-            end)
+              Map.new(opts, fn {key, value} ->
+                if key in action.accept do
+                  {key, value}
+                else
+                  raise KeyError, key: key
+                end
+              end)
+          end
         end
       end
     end
   end
 
-  @spec set_metadata(Ash.Resource.record(), map) :: Ash.Resource.record()
+  @spec set_metadata(Ash.Resource.Record.t(), map) :: Ash.Resource.Record.t()
   def set_metadata(record, map) do
     %{record | __metadata__: Ash.Helpers.deep_merge_maps(record.__metadata__, map)}
   end
@@ -429,27 +464,27 @@ defmodule Ash.Resource do
 
   def set_meta(struct, _), do: struct
 
-  @spec put_metadata(Ash.Resource.record(), atom, term) :: Ash.Resource.record()
+  @spec put_metadata(Ash.Resource.Record.t(), atom, term) :: Ash.Resource.Record.t()
   def put_metadata(record, key, term) do
     set_metadata(record, %{key => term})
   end
 
   @doc "Sets a list of loaded key or paths to a key back to their original unloaded stated"
   @spec unload_many(
-          nil | list(Ash.Resource.record()) | Ash.Resource.record() | Ash.Page.page(),
+          nil | list(Ash.Resource.Record.t()) | Ash.Resource.Record.t() | Ash.Page.page(),
           list(atom) | list(list(atom))
         ) ::
-          nil | list(Ash.Resource.record()) | Ash.Resource.record() | Ash.Page.page()
+          nil | list(Ash.Resource.Record.t()) | Ash.Resource.Record.t() | Ash.Page.page()
   def unload_many(data, paths) do
     Enum.reduce(paths, data, &unload(&2, &1))
   end
 
   @doc "Sets a loaded key or path to a key back to its original unloaded stated"
   @spec unload(
-          nil | list(Ash.Resource.record()) | Ash.Resource.record() | Ash.Page.page(),
+          nil | list(Ash.Resource.Record.t()) | Ash.Resource.Record.t() | Ash.Page.page(),
           atom | list(atom)
         ) ::
-          nil | list(Ash.Resource.record()) | Ash.Resource.record() | Ash.Page.page()
+          nil | list(Ash.Resource.Record.t()) | Ash.Resource.Record.t() | Ash.Page.page()
   def unload(nil, _), do: nil
 
   def unload(%struct{results: results} = page, path)
@@ -485,7 +520,7 @@ defmodule Ash.Resource do
   - `strict?`: set to `true` to return false if a calculation with arguments is being checked
   """
   @spec loaded?(
-          nil | list(Ash.Resource.record()) | Ash.Resource.record() | Ash.Page.page(),
+          nil | list(Ash.Resource.Record.t()) | Ash.Resource.Record.t() | Ash.Page.page(),
           atom | Ash.Query.Calculation.t() | Ash.Query.Aggregate.t() | list(atom),
           opts :: Keyword.t()
         ) ::
@@ -706,7 +741,7 @@ defmodule Ash.Resource do
     Ash.Type.loaded?(type, value, path, constraints, opts)
   end
 
-  @spec get_metadata(Ash.Resource.record(), atom | list(atom)) :: term
+  @spec get_metadata(Ash.Resource.Record.t(), atom | list(atom)) :: term
   def get_metadata(record, key_or_path) do
     get_in(record.__metadata__ || %{}, List.wrap(key_or_path))
   end
@@ -719,7 +754,7 @@ defmodule Ash.Resource do
   - `forbidden_means_selected?`: set to `true` to return `true` if the field is marked as forbidden
 
   """
-  @spec selected?(Ash.Resource.record(), atom) :: boolean
+  @spec selected?(Ash.Resource.Record.t(), atom) :: boolean
   def selected?(record, field, opts \\ []) do
     case Map.get(record, field) do
       %Ash.NotLoaded{} -> false

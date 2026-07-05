@@ -31,6 +31,39 @@ end
 
 These will then be called on the resource itself, i.e `Helpdesk.Support.Ticket.open(subject)`.
 
+## Splitting interfaces across modules with `namespace`
+
+By default every `define`/`define_calculation` adds functions to the host module — the domain when used inside `resources` (`resource Ticket do define ... end`), and the resource itself when used inside the resource's own `code_interface` block. If you'd rather group functions onto a separate module (for organization, or to keep any single module smaller), set `namespace`:
+
+```elixir
+# Domain-side
+resources do
+  resource Patient do
+    namespace Patients
+
+    define :create_patient, action: :create
+    define :read_patients, action: :read
+
+    # per-define override
+    define :archive, action: :archive, namespace: PatientArchive
+  end
+end
+```
+
+```elixir
+# Resource-side
+code_interface do
+  namespace Iface
+
+  define :create, action: :create
+  define :read, action: :read
+end
+```
+
+The `namespace:` value is concatenated to the host module. With `Helpdesk.Support` as the domain, `namespace: Tickets` produces `Helpdesk.Support.Tickets.open_ticket/...`; on a resource `Helpdesk.Support.Ticket`, `namespace: Iface` produces `Helpdesk.Support.Ticket.Iface.open/...`. Per-entry `namespace:` overrides the block-level default.
+
+Ash refuses to overwrite an existing module, so the generated target name must be unique. Definitions without a `namespace:` (and without a block-level default) continue to land on the host module.
+
 ## Using the code interface
 
 If the action is an update or destroy, it will take a record or a changeset as its _first_ argument.
@@ -174,6 +207,11 @@ To make arguments optional, wrap them in `{:optional, ..}`, for example:
 ```elixir
 define_calculation :id_matches, args: [{:arg, :id}, {:optional, {:ref, :id}}]
 ```
+
+When a calculation interface name ends in `?`, Ash generates two functions using the same pattern as [predicate interfaces](#predicate-interfaces-names-ending-in-):
+
+- `active/…` — name with `?` stripped — returns `{:ok, result}` or `{:error, reason}`
+- `active?/…` — interface name — returns the unwrapped result (raises on failure)
 
 ## Bulk & atomic actions
 
@@ -363,7 +401,106 @@ MyApp.get_user(123, load: [:posts], authorize?: false)
 # Results in: [load: [:profile, :posts], authorize?: false]
 ```
 
+## Generated helpers 
+
+Named functions for code interfaces are not the only functions generated when you define a code interface on a resource or a domain. 
+
+### Predicate interfaces (names ending in `?`)
+
+In Elixir, function names ending in `?` are usually expected to be predicates, which return bare booleans. For most code interfaces, Ash generates two action functions: a non-`!` function that returns `{:ok, result}` or `{:error, reason}`, and a `!` function that returns the unwrapped result (or raises on error).
+
+When the interface name itself ends in `?`, Ash treats it as a **predicate interface** and generates different action helpers.
+
+This applies regardless of action type, though it is most commonly used with generic actions that return `:boolean`, where the `?` name matches Elixir predicate conventions.
+
+- Two **action functions** are generated, using the same naming pattern as [calculation interfaces](#calculations):
+  - `user_exists/…` (with `?` stripped from the name) returns `{:ok, result}` or `{:error, reason}`
+  - `user_exists?/…` returns the **unwrapped result** directly (typically a bare `true` or `false`); on failure it **raises**, like other `!` variants, rather than returning `{:error, _}`
+- **No** `user_exists!/…` or `user_exists?!/…` functions are generated
+
+This matches how you would use a predicate in Elixir:
+```elixir
+if MyApp.Accounts.user_exists?(email) do
+  ...
+end
+```
+
+#### Example
+```elixir
+# on the resource
+actions do
+  action :user_exists?, :boolean do
+    argument :email, :string, allow_nil?: false
+
+    run fn input, _ ->
+      exists =
+        User
+        |> Ash.Query.filter_input(email: input.arguments.email)
+        |> Ash.exists?()
+      
+      {:ok, exists}
+    end
+  end
+end
+
+# in your domain or code_interface block
+resources do
+  resource User do
+    define :user_exists?, action: :user_exists?, args: [:email]
+  end
+end
+
+# => true or false — not {:ok, true}
+MyApp.Accounts.user_exists?("alice@example.com")
+
+# => {:ok, true} | {:ok, false} | {:error, reason}
+MyApp.Accounts.user_exists("alice@example.com")
+```
+The action’s `run` callback still follows the normal action contract and returns `{:ok, result}` or `{:error, reason}`. The `user_exists?/…` function is what unwraps that result for callers, the same way a `!` function would for a non-predicate interface.
+
+Compare with a normal interface:
+```elixir
+define :create_user, action: :create
+
+# MyApp.create_user/…   => {:ok, user} | {:error, reason}
+# MyApp.create_user!/…  => user | raise
+```
+
+For a predicate interface:
+```elixir
+define :user_exists?, action: :user_exists?, args: [:email]
+
+# MyApp.Accounts.user_exists/…   => {:ok, true/false} | {:error, reason}
+# MyApp.Accounts.user_exists?/…  => true/false | raise
+```
+
+#### Authorization helpers
+For predicate interfaces, authorization helpers are named to avoid doubling the `?`:
+- `can_user_exists/…` returns `{:ok, true/false}` or `{:error, reason}`
+- `can_user_exists?/…` returns a bare boolean (true/false)
+- **No** `can_user_exists??/…` function is generated
+
+For a normal interface named `:create_post`, the helpers are `can_create_post/…` and `can_create_post?/…`:
+```elixir
+if MyApp.Accounts.can_user_exists?(current_user, email) do
+  # ...
+end
+
+{:ok, true} = MyApp.Accounts.can_user_exists(current_user, email)
+```
+Subject helpers (such as `input_to_user_exists?/…` for generic actions) are still generated using the interface name.
+
+#### The `functions` option
+By default, code interfaces generate `[:subject, :can, :can?, :action, :action!]`. For predicate interfaces:
+
+- `:action` generates the tuple-returning function without `?` (e.g. `user_exists/…`)
+- `:action!` generates the unwrapped predicate function under the `?` name (e.g. `user_exists?/…`), without appending `!`
+
+If you customize `functions:` and remove `:action`, the tuple-returning function will not be generated. If you remove `:action!`, the bare-boolean predicate function will not be generated.
+
 ### Authorization Functions
+
+For predicate interfaces (names ending in `?`), see [Predicate interfaces](#predicate-interfaces-names-ending-in-) above for how authorization helpers are named.
 
 For each action defined in a code interface, Ash automatically generates corresponding authorization check functions:
 
@@ -405,3 +542,30 @@ end
 # This will log authorization details to help with debugging
 MyApp.Blog.can_create_post(current_user, %{title: "New Post"}, log?: true)
 ```
+
+### Subject Helper Functions
+
+For each action defined in a code interface, Ash also generates a helper that returns the underlying *subject* (an `Ash.Query`, `Ash.Changeset`, or `Ash.ActionInput`) instead of executing the action. The function name depends on the action type:
+
+- Read actions: `query_to_action_name(...)` returns an `Ash.Query`
+- Create / update / destroy actions: `changeset_to_action_name(...)` returns an `Ash.Changeset`
+- Generic actions: `input_to_action_name(...)` returns an `Ash.ActionInput`
+
+They accept the same positional arguments, params map, and a subset of the options (`:actor`, `:tenant`, `:scope`, `:authorize?`, `:tracer`, and `:query`/`:changeset`/`:input`) as the regular interface function, so the returned subject is built exactly the way the action would build it before running.
+
+```elixir
+# Read action — get the query without running it
+query = MyApp.Blog.query_to_list_posts(%{published: true}, actor: current_user)
+
+# Create / update / destroy — get the changeset without running it
+changeset = MyApp.Blog.changeset_to_create_post(%{title: "Hello"}, actor: current_user)
+
+# Generic action — get the input without running it
+input = MyApp.Blog.input_to_send_newsletter(%{subject: "Weekly digest"})
+```
+
+These helpers are useful when you need to:
+
+- Inspect or further customise the query/changeset before executing it (e.g. add filters, sorts, or extra `Ash.Changeset` calls).
+- Drive a form or other UI from the same configuration the action would use.
+- Assert on the constructed subject in tests without running the action.

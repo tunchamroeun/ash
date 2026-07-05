@@ -61,7 +61,8 @@ defmodule Ash.Actions.Destroy.Bulk do
   end
 
   def run(domain, %Ash.Query{} = query, action, input, opts, not_atomic_reason) do
-    action_name = if is_atom(action), do: action, else: action.name
+    opts = Ash.Actions.Helpers.apply_scope_to_opts(opts)
+    action_name = action.name
 
     Ash.Tracer.span :bulk_destroy,
                     fn ->
@@ -92,9 +93,11 @@ defmodule Ash.Actions.Destroy.Bulk do
                                     action: action_name
                                   }
                                 end do
-        opts = set_strategy(opts, query.resource)
-
-        opts = select(opts, query.resource)
+        opts =
+          opts
+          |> set_strategy(query.resource)
+          |> select(query.resource)
+          |> Keyword.put(:context, query.context)
 
         opts =
           if opts[:return_notifications?] do
@@ -453,6 +456,7 @@ defmodule Ash.Actions.Destroy.Bulk do
   end
 
   def run(domain, stream, action, input, opts, not_atomic_reason) do
+    opts = Ash.Actions.Helpers.apply_scope_to_opts(opts)
     resource = opts[:resource]
 
     opts = select(opts, resource)
@@ -470,24 +474,6 @@ defmodule Ash.Actions.Destroy.Bulk do
       not_atomic_reason ||
         if :atomic_batches not in opts[:strategy],
           do: "Cannot perform atomic destroys on an enumerable of inputs"
-
-    action =
-      case action do
-        nil ->
-          Ash.Resource.Info.primary_action!(resource, :update)
-
-        name when is_atom(name) ->
-          action = Ash.Resource.Info.action(resource, action)
-
-          if !action do
-            raise Ash.Error.Invalid.NoSuchAction, resource: resource, action: name, type: :update
-          end
-
-          action
-
-        action ->
-          action
-      end
 
     if opts[:transaction] == :all && opts[:return_stream?] do
       raise ArgumentError,
@@ -1161,7 +1147,7 @@ defmodule Ash.Actions.Destroy.Bulk do
     manual_action_can_bulk? =
       case action.manual do
         {mod, _opts} ->
-          function_exported?(mod, :bulk_destroy, 3)
+          Code.ensure_loaded?(mod) and function_exported?(mod, :bulk_destroy, 3)
 
         _ ->
           false
@@ -1884,7 +1870,7 @@ defmodule Ash.Actions.Destroy.Bulk do
         0
       end
 
-    if max_concurrency && max_concurrency > 1 do
+    if max_concurrency > 1 do
       ash_context = Ash.ProcessHelpers.get_context_for_transfer(opts)
 
       Task.async_stream(
@@ -2111,7 +2097,7 @@ defmodule Ash.Actions.Destroy.Bulk do
                     [] -> %{}
                   end
 
-                if function_exported?(mod, :bulk_destroy, 3) do
+                if Code.ensure_loaded?(mod) and function_exported?(mod, :bulk_destroy, 3) do
                   Ash.Resource.ManualDestroy.bulk_destroy(
                     mod,
                     batch,
@@ -2332,7 +2318,7 @@ defmodule Ash.Actions.Destroy.Bulk do
           domain :: Ash.Domain.t(),
           resource :: Ash.Resource.t(),
           base_changeset :: Ash.Changeset.t()
-        ) :: [Ash.Resource.record() | {:error, term()}]
+        ) :: [Ash.Resource.Record.t() | {:error, term()}]
   defp process_results(
          tagged_results,
          opts,

@@ -6,6 +6,7 @@ defmodule Ash.Type.MapTest do
   use ExUnit.Case, async: true
 
   alias Ash.Test.Domain, as: Domain
+  alias Ash.Test.DumpTestType
 
   defmodule Post do
     @moduledoc false
@@ -466,6 +467,380 @@ defmodule Ash.Type.MapTest do
                path: [:metadata]
              }
            ] = changeset.errors
+  end
+
+  describe "dump_to_native" do
+    test "recursively dumps field types" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: DumpTestType],
+            count: [type: :integer]
+          ]
+        )
+
+      assert {:ok, %{name: "embedded:hello", count: 42}} =
+               Ash.Type.dump_to_native(Ash.Type.Map, %{name: "hello", count: 42}, constraints)
+    end
+
+    test "drops extra keys not in field definitions" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: :string]
+          ]
+        )
+
+      assert {:ok, %{name: "hello"}} =
+               Ash.Type.dump_to_native(
+                 Ash.Type.Map,
+                 %{name: "hello", extra: "dropped"},
+                 constraints
+               )
+    end
+
+    test "without fields returns map as-is" do
+      assert {:ok, %{anything: "goes"}} =
+               Ash.Type.dump_to_native(Ash.Type.Map, %{anything: "goes"}, [])
+    end
+
+    test "handles nil" do
+      assert {:ok, nil} = Ash.Type.dump_to_native(Ash.Type.Map, nil, [])
+    end
+
+    test "handles missing fields gracefully" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: :string],
+            age: [type: :integer]
+          ]
+        )
+
+      assert {:ok, %{name: "hello"}} =
+               Ash.Type.dump_to_native(Ash.Type.Map, %{name: "hello"}, constraints)
+    end
+
+    test "respects preserve_nil_values? true" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [name: [type: :string]],
+          preserve_nil_values?: true
+        )
+
+      assert {:ok, %{name: nil}} =
+               Ash.Type.dump_to_native(Ash.Type.Map, %{name: nil}, constraints)
+    end
+
+    test "respects preserve_nil_values? false" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [name: [type: :string]],
+          preserve_nil_values?: false
+        )
+
+      assert {:ok, %{}} =
+               Ash.Type.dump_to_native(Ash.Type.Map, %{name: nil}, constraints)
+    end
+
+    test "honors string keys in field lookup" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: DumpTestType]
+          ]
+        )
+
+      assert {:ok, %{name: "embedded:hello"}} =
+               Ash.Type.dump_to_native(Ash.Type.Map, %{"name" => "hello"}, constraints)
+    end
+
+    test "returns error for non-map values" do
+      assert :error = Ash.Type.dump_to_native(Ash.Type.Map, "string", [])
+      assert :error = Ash.Type.dump_to_native(Ash.Type.Map, 123, [])
+    end
+  end
+
+  describe "dump_to_embedded" do
+    test "recursively calls dump_to_embedded on field types" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: DumpTestType],
+            count: [type: :integer]
+          ]
+        )
+
+      assert {:ok, %{name: "embedded:hello", count: 42}} =
+               Ash.Type.dump_to_embedded(Ash.Type.Map, %{name: "hello", count: 42}, constraints)
+    end
+
+    test "dump_to_native also dumps fields with dump_to_embedded, for JSON safety" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            val: [type: DumpTestType]
+          ]
+        )
+
+      {:ok, native_result} =
+        Ash.Type.dump_to_native(Ash.Type.Map, %{val: "test"}, constraints)
+
+      {:ok, embedded_result} =
+        Ash.Type.dump_to_embedded(Ash.Type.Map, %{val: "test"}, constraints)
+
+      assert native_result[:val] == "embedded:test"
+      assert embedded_result[:val] == "embedded:test"
+    end
+
+    test "without fields returns map as-is" do
+      assert {:ok, %{anything: "goes"}} =
+               Ash.Type.dump_to_embedded(Ash.Type.Map, %{anything: "goes"}, [])
+    end
+
+    test "handles nil" do
+      assert {:ok, nil} = Ash.Type.dump_to_embedded(Ash.Type.Map, nil, [])
+    end
+
+    test "drops extra keys not in field definitions" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [name: [type: :string]]
+        )
+
+      assert {:ok, %{name: "hello"}} =
+               Ash.Type.dump_to_embedded(
+                 Ash.Type.Map,
+                 %{name: "hello", extra: "dropped"},
+                 constraints
+               )
+    end
+
+    test "respects preserve_nil_values?" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [name: [type: :string]],
+          preserve_nil_values?: true
+        )
+
+      assert {:ok, %{name: nil}} =
+               Ash.Type.dump_to_embedded(Ash.Type.Map, %{name: nil}, constraints)
+
+      {:ok, constraints_no_nil} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [name: [type: :string]],
+          preserve_nil_values?: false
+        )
+
+      assert {:ok, %{}} =
+               Ash.Type.dump_to_embedded(Ash.Type.Map, %{name: nil}, constraints_no_nil)
+    end
+
+    test "honors string keys in field lookup" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [name: [type: DumpTestType]]
+        )
+
+      assert {:ok, %{name: "embedded:hello"}} =
+               Ash.Type.dump_to_embedded(Ash.Type.Map, %{"name" => "hello"}, constraints)
+    end
+
+    test "returns error for non-map values" do
+      assert :error = Ash.Type.dump_to_embedded(Ash.Type.Map, "string", [])
+    end
+  end
+
+  describe "JSON safety of dump_to_native (#2747)" do
+    test "dumped map with binary-native field types stays JSON-encodable" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            previous_block_id: [type: :uuid_v7, allow_nil?: false],
+            data: [type: :binary]
+          ]
+        )
+
+      uuid = Ash.UUIDv7.generate()
+      binary = <<1, 158, 179, 13, 254, 207>>
+
+      {:ok, casted} =
+        Ash.Type.cast_input(
+          Ash.Type.Map,
+          %{previous_block_id: uuid, data: binary},
+          constraints
+        )
+
+      {:ok, dumped} = Ash.Type.dump_to_native(Ash.Type.Map, casted, constraints)
+
+      json = Jason.encode!(dumped)
+
+      {:ok, loaded} =
+        Ash.Type.cast_stored(Ash.Type.Map, Jason.decode!(json), constraints)
+
+      assert loaded == %{previous_block_id: uuid, data: binary}
+    end
+  end
+
+  describe "cast_from_embedded" do
+    test "recursively calls cast_from_embedded on field types" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: DumpTestType],
+            count: [type: :integer]
+          ]
+        )
+
+      assert {:ok, %{name: "hello", count: 42}} =
+               Ash.Type.cast_from_embedded(
+                 Ash.Type.Map,
+                 %{name: "embedded:hello", count: 42},
+                 constraints
+               )
+    end
+
+    test "cast_stored also loads fields with cast_from_embedded, since they are dumped with dump_to_embedded" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            val: [type: DumpTestType]
+          ]
+        )
+
+      # DumpTestType.cast_stored only strips "native:", DumpTestType.cast_from_embedded
+      # only strips "embedded:" — so the prefix tells us which callback ran on the field.
+      {:ok, from_stored} =
+        Ash.Type.cast_stored(Ash.Type.Map, %{val: "embedded:test"}, constraints)
+
+      {:ok, from_embedded} =
+        Ash.Type.cast_from_embedded(Ash.Type.Map, %{val: "embedded:test"}, constraints)
+
+      assert from_stored.val == "test"
+      assert from_embedded.val == "test"
+    end
+
+    test "without fields returns map as-is" do
+      assert {:ok, %{anything: "goes"}} =
+               Ash.Type.cast_from_embedded(Ash.Type.Map, %{anything: "goes"}, [])
+    end
+
+    test "handles nil" do
+      assert {:ok, nil} = Ash.Type.cast_from_embedded(Ash.Type.Map, nil, [])
+    end
+
+    test "respects preserve_nil_values?" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [name: [type: :string]],
+          preserve_nil_values?: true
+        )
+
+      assert {:ok, %{name: nil}} =
+               Ash.Type.cast_from_embedded(Ash.Type.Map, %{name: nil}, constraints)
+
+      {:ok, constraints_no_nil} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [name: [type: :string]],
+          preserve_nil_values?: false
+        )
+
+      assert {:ok, %{}} =
+               Ash.Type.cast_from_embedded(Ash.Type.Map, %{name: nil}, constraints_no_nil)
+    end
+
+    test "honors string keys in field lookup" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [name: [type: DumpTestType]]
+        )
+
+      assert {:ok, %{name: "hello"}} =
+               Ash.Type.cast_from_embedded(
+                 Ash.Type.Map,
+                 %{"name" => "embedded:hello"},
+                 constraints
+               )
+    end
+
+    test "returns error for non-map values" do
+      assert :error = Ash.Type.cast_from_embedded(Ash.Type.Map, "string", [])
+    end
+  end
+
+  describe "dump/cast round-trip" do
+    test "dump_to_native then cast_stored preserves data" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: :string],
+            count: [type: :integer]
+          ]
+        )
+
+      original = %{name: "hello", count: 42}
+
+      assert {:ok, dumped} = Ash.Type.dump_to_native(Ash.Type.Map, original, constraints)
+      assert {:ok, restored} = Ash.Type.cast_stored(Ash.Type.Map, dumped, constraints)
+      assert restored == original
+    end
+
+    test "dump_to_native then cast_stored with string keys round-trips" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: :string],
+            count: [type: :integer]
+          ]
+        )
+
+      original = %{name: "hello", count: 42}
+
+      assert {:ok, dumped} = Ash.Type.dump_to_native(Ash.Type.Map, original, constraints)
+
+      # Simulate stored data having string keys (common with JSON storage)
+      string_keyed = Map.new(dumped, fn {k, v} -> {to_string(k), v} end)
+
+      assert {:ok, restored} = Ash.Type.cast_stored(Ash.Type.Map, string_keyed, constraints)
+      assert restored == original
+    end
+
+    test "dump_to_embedded then cast_from_embedded preserves data" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: :string],
+            count: [type: :integer]
+          ]
+        )
+
+      original = %{name: "hello", count: 42}
+
+      assert {:ok, dumped} = Ash.Type.dump_to_embedded(Ash.Type.Map, original, constraints)
+      assert {:ok, restored} = Ash.Type.cast_from_embedded(Ash.Type.Map, dumped, constraints)
+      assert restored == original
+    end
+
+    test "dump_to_embedded then cast_from_embedded with string keys round-trips" do
+      {:ok, constraints} =
+        Ash.Type.init(Ash.Type.Map,
+          fields: [
+            name: [type: :string],
+            count: [type: :integer]
+          ]
+        )
+
+      original = %{name: "hello", count: 42}
+
+      assert {:ok, dumped} = Ash.Type.dump_to_embedded(Ash.Type.Map, original, constraints)
+
+      string_keyed = Map.new(dumped, fn {k, v} -> {to_string(k), v} end)
+
+      assert {:ok, restored} =
+               Ash.Type.cast_from_embedded(Ash.Type.Map, string_keyed, constraints)
+
+      assert restored == original
+    end
   end
 
   test "string_match validates against regex pattern" do

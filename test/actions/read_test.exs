@@ -108,6 +108,11 @@ defmodule Ash.Test.Actions.ReadTest do
         validate string_length(:username, min: 3, max: 20)
       end
 
+      read :read_with_byte_size do
+        argument :username, :string
+        validate byte_size(:username, min: 3, max: 4)
+      end
+
       # Tests for where clauses
       read :read_with_preparation_where do
         argument :should_prepare, :boolean, default: false
@@ -195,6 +200,14 @@ defmodule Ash.Test.Actions.ReadTest do
 
       read :read_with_authors do
         prepare(build(load: [:author1, :author2]))
+      end
+
+      read :read_with_authors_before_action do
+        prepare(
+          before_action(fn query, _context ->
+            Ash.Query.load(query, [:author1, :author2])
+          end)
+        )
       end
 
       read :read_with_unknown_intpus do
@@ -313,6 +326,8 @@ defmodule Ash.Test.Actions.ReadTest do
   end
 
   describe "Ash.get! with action" do
+    import ExUnit.CaptureLog
+
     setup do
       author1 =
         Author
@@ -332,6 +347,15 @@ defmodule Ash.Test.Actions.ReadTest do
     test "it uses the action provided", %{post: post, author1: author1} do
       fetched_post = Ash.get!(Post, post.id, action: :read_with_authors)
       assert ^author1 = strip_metadata(fetched_post.author1)
+    end
+
+    test "before_action cannot add load statements and logs a warning", %{post: post} do
+      log =
+        capture_log(fn ->
+          assert Ash.get!(Post, post.id, action: :read_with_authors_before_action)
+        end)
+
+      assert log =~ "Cannot add load statements in before_action hooks on read actions"
     end
   end
 
@@ -413,7 +437,8 @@ defmodule Ash.Test.Actions.ReadTest do
 
     test "raises an error when the second argument is not a list" do
       assert_raise ArgumentError, "Expected a keyword list in `Ash.read\/2`, got: 1", fn ->
-        Ash.read(Post, 1)
+        # apply/3 hides the intentionally-wrong argument type from the type checker
+        apply(Ash, :read, [Post, 1])
       end
     end
 
@@ -462,7 +487,8 @@ defmodule Ash.Test.Actions.ReadTest do
 
     test "raises an error when the second argument is not a list" do
       assert_raise ArgumentError, "Expected a keyword list in `Ash.read!/2`, got: 1", fn ->
-        Ash.read!(Post, 1)
+        # apply/3 hides the intentionally-wrong argument type from the type checker
+        apply(Ash, :read!, [Post, 1])
       end
     end
 
@@ -577,7 +603,8 @@ defmodule Ash.Test.Actions.ReadTest do
 
     test "raises an error when the second argument is not a list" do
       assert_raise ArgumentError, "Expected a keyword list in `Ash.read_one/2`, got: 1", fn ->
-        Ash.read_one(Post, 1)
+        # apply/3 hides the intentionally-wrong argument type from the type checker
+        apply(Ash, :read_one, [Post, 1])
       end
     end
 
@@ -592,6 +619,32 @@ defmodule Ash.Test.Actions.ReadTest do
       Ash.create!(Ash.Changeset.for_create(Post, :create, %{}, authorize?: false))
       Ash.create!(Ash.Changeset.for_create(Post, :create, %{}, authorize?: false))
       assert %Post{} = Ash.read_one!(Post |> Ash.Query.limit(1))
+    end
+
+    test "it applies the lock option" do
+      assert {:error,
+              %Ash.Error.Invalid{
+                errors: [
+                  %Ash.Error.Query.LockNotSupported{
+                    resource: Post,
+                    lock_type: :for_update
+                  }
+                ]
+              }} = Ash.read_one(Post, lock: :for_update)
+    end
+  end
+
+  describe "Ash.read_first/2" do
+    test "it applies the lock option" do
+      assert {:error,
+              %Ash.Error.Invalid{
+                errors: [
+                  %Ash.Error.Query.LockNotSupported{
+                    resource: Post,
+                    lock_type: :for_update
+                  }
+                ]
+              }} = Ash.read_first(Post, lock: :for_update)
     end
   end
 
@@ -610,7 +663,8 @@ defmodule Ash.Test.Actions.ReadTest do
 
     test "raises an error when the second argument is not a list" do
       assert_raise ArgumentError, "Expected a keyword list in `Ash.read_one!/2`, got: 1", fn ->
-        Ash.read_one!(Post, 1)
+        # apply/3 hides the intentionally-wrong argument type from the type checker
+        apply(Ash, :read_one!, [Post, 1])
       end
     end
 
@@ -1190,6 +1244,29 @@ defmodule Ash.Test.Actions.ReadTest do
         |> Ash.Query.for_read(:read_with_string_length, %{
           username: "this_username_is_way_too_long_to_be_valid"
         })
+        |> Ash.read!()
+      end
+    end
+
+    test "byte_size validation passes when string is within bounds" do
+      assert [] =
+               Author
+               |> Ash.Query.for_read(:read_with_byte_size, %{username: "🔥"})
+               |> Ash.read!()
+    end
+
+    test "byte_size validation fails when string is too short" do
+      assert_raise Ash.Error.Invalid, ~r/must have byte size of between/, fn ->
+        Author
+        |> Ash.Query.for_read(:read_with_byte_size, %{username: "no"})
+        |> Ash.read!()
+      end
+    end
+
+    test "byte_size validation fails when string is too long" do
+      assert_raise Ash.Error.Invalid, ~r/must have byte size of between/, fn ->
+        Author
+        |> Ash.Query.for_read(:read_with_byte_size, %{username: "🔥a"})
         |> Ash.read!()
       end
     end

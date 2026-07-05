@@ -10,6 +10,7 @@ defmodule Ash.Actions.Create.Bulk do
   @spec run(Ash.Domain.t(), Ash.Resource.t(), atom(), Enumerable.t(map), Keyword.t()) ::
           Ash.BulkResult.t()
   def run(domain, resource, action_name, inputs, opts) do
+    opts = Ash.Actions.Helpers.apply_scope_to_opts(opts)
     action = Ash.Resource.Info.action(resource, action_name)
 
     opts =
@@ -148,7 +149,7 @@ defmodule Ash.Actions.Create.Bulk do
         manual_action_can_bulk? =
           case action.manual do
             {mod, _opts} ->
-              function_exported?(mod, :bulk_create, 3)
+              Code.ensure_loaded?(mod) and function_exported?(mod, :bulk_create, 3)
 
             _ ->
               false
@@ -800,7 +801,8 @@ defmodule Ash.Actions.Create.Bulk do
       opts[:notify?] ||
         Enum.any?(batch, fn item ->
           item.after_action != [] ||
-            item.after_transaction != []
+            item.after_transaction != [] ||
+            item.authorize_results != []
         end)
 
     # Can return both valid and invalid changesets
@@ -918,7 +920,7 @@ defmodule Ash.Actions.Create.Bulk do
         0
       end
 
-    if max_concurrency && max_concurrency > 1 do
+    if max_concurrency > 1 do
       ash_context = Ash.ProcessHelpers.get_context_for_transfer(opts)
 
       Task.async_stream(
@@ -1204,7 +1206,7 @@ defmodule Ash.Actions.Create.Bulk do
                 Ash.Resource.Info.primary_key(resource)
 
               identity ->
-                keys =
+                identity_record =
                   resource
                   |> Ash.Resource.Info.identities()
                   |> Enum.find(&(&1.name == identity))
@@ -1213,11 +1215,12 @@ defmodule Ash.Actions.Create.Bulk do
                       resource: resource,
                       identity: identity
                   )
-                  |> Map.get(:keys)
 
-                if opts[:tenant] &&
+                keys = identity_record.keys
+
+                if !identity_record.all_tenants? &&
                      Ash.Resource.Info.multitenancy_strategy(resource) == :attribute do
-                  [Ash.Resource.Info.multitenancy_attribute(resource) | keys]
+                  Enum.uniq([Ash.Resource.Info.multitenancy_attribute(resource) | keys])
                 else
                   keys
                 end
@@ -1241,7 +1244,7 @@ defmodule Ash.Actions.Create.Bulk do
                       %{}
                   end
 
-                if function_exported?(mod, :bulk_create, 3) do
+                if Code.ensure_loaded?(mod) and function_exported?(mod, :bulk_create, 3) do
                   Ash.Resource.ManualCreate.bulk_create(
                     mod,
                     batch,
@@ -1603,7 +1606,7 @@ defmodule Ash.Actions.Create.Bulk do
           domain :: Ash.Domain.t(),
           resource :: Ash.Resource.t(),
           action :: Ash.Resource.Actions.action()
-        ) :: [Ash.Resource.record() | {:error, term()}]
+        ) :: [Ash.Resource.Record.t() | {:error, term()}]
   defp process_results(
          batch,
          opts,
@@ -1980,7 +1983,8 @@ defmodule Ash.Actions.Create.Bulk do
             must_return_records? =
               state.must_return_records? ||
                 Enum.any?(batch, fn item ->
-                  item.relationships not in [nil, %{}] || !Enum.empty?(item.after_action)
+                  item.relationships not in [nil, %{}] || !Enum.empty?(item.after_action) ||
+                    !Enum.empty?(item.authorize_results)
                 end) ||
                 (module.has_batch_change?() &&
                    module.has_after_batch?() &&
@@ -2041,7 +2045,8 @@ defmodule Ash.Actions.Create.Bulk do
               must_return_records? =
                 state.must_return_records? ||
                   Enum.any?(batch, fn item ->
-                    item.relationships not in [nil, %{}] || !Enum.empty?(item.after_action)
+                    item.relationships not in [nil, %{}] || !Enum.empty?(item.after_action) ||
+                      !Enum.empty?(item.authorize_results)
                   end) ||
                   (module.has_batch_change?() &&
                      module.has_after_batch?() &&

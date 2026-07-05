@@ -72,9 +72,16 @@ defmodule Ash.Type.Union do
       Additionally, if you are not using a tag, a value will be considered to be of the given type if it successfully casts.
       This means that, for example, if you try to cast `"10"` as a union of a string and an integer, it will end up as `"10"` because
       it is a string. If you put the integer type ahead of the string type, it will cast first and `10` will be the value.
+
+      Each union arm also accepts `init?: false`, which skips compile-time
+      initialisation of that arm's type constraints. Use this to break recursive
+      type references.
       """
     ]
   ]
+
+  @impl true
+  def referenced_types(constraints), do: Ash.Type.field_referenced_types(constraints[:types])
 
   @impl true
   def init(constraints) do
@@ -492,32 +499,31 @@ defmodule Ash.Type.Union do
             List.wrap(load[:*]) ++ List.wrap(load[name])
           end
 
+        type_config = constraints[:types][name]
+
         result =
-          if our_load do
-            type = constraints[:types][name][:type]
+          cond do
+            is_nil(type_config) ->
+              {:ok, values}
 
-            Ash.Type.load(
-              type,
-              values,
-              our_load,
-              constraints[:types][name][:constraints],
-              context
-            )
-          else
-            type = constraints[:types][name][:type]
-            constraints = constraints[:types][name][:constraints]
-
-            if Ash.Type.can_load?(type, constraints) do
-              Ash.Type.load(
-                type,
+            our_load ->
+              load_union_values(
+                type_config[:type],
                 values,
-                [],
-                constraints,
+                our_load,
+                type_config[:constraints],
                 context
               )
-            else
-              {:ok, values}
-            end
+
+            true ->
+              type = type_config[:type]
+              type_constraints = type_config[:constraints]
+
+              if Ash.Type.can_load?(type, type_constraints) do
+                load_union_values(type, values, [], type_constraints, context)
+              else
+                {:ok, values}
+              end
           end
 
         case result do
@@ -553,6 +559,49 @@ defmodule Ash.Type.Union do
     else
       {:ok, unions}
     end
+  end
+
+  # Flatten array-member values into one batched leaf load, then regroup per union.
+  defp load_union_values({:array, inner} = type, values, load, constraints, context) do
+    shapes =
+      Enum.map(values, fn
+        value when is_list(value) -> length(value)
+        other -> other
+      end)
+
+    flat =
+      Enum.flat_map(values, fn
+        value when is_list(value) -> value
+        _ -> []
+      end)
+
+    inner_result =
+      case inner do
+        {:array, _} ->
+          load_union_values(inner, flat, load, constraints[:items] || [], context)
+
+        _ ->
+          Ash.Type.load(type, flat, load, constraints, context)
+      end
+
+    case inner_result do
+      {:ok, loaded} -> {:ok, regroup_union_values(loaded, shapes)}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp load_union_values(type, values, load, constraints, context) do
+    Ash.Type.load(type, values, load, constraints, context)
+  end
+
+  defp regroup_union_values(loaded, shapes) do
+    {regrouped, []} =
+      Enum.map_reduce(shapes, loaded, fn
+        length, remaining when is_integer(length) -> Enum.split(remaining, length)
+        passthrough, remaining -> {passthrough, remaining}
+      end)
+
+    regrouped
   end
 
   def generator(constraints) do
@@ -659,7 +708,7 @@ defmodule Ash.Type.Union do
         constraints[:types][value.type][:type],
         &1,
         type_rewrites,
-        constraints[:types][value.type][:type]
+        constraints[:types][value.type][:constraints] || []
       )
     )
   end
@@ -771,11 +820,21 @@ defmodule Ash.Type.Union do
             config[:constraints] || []
           end
 
+        constraints_with_include_source =
+          if Ash.Type.embedded_type?(config[:type]) and
+               function_exported?(config[:type], :include_source, 2) do
+            Keyword.put_new_lazy(config_constraints, :include_source?, fn ->
+              Keyword.get(constraints, :include_source?, @include_source_by_default)
+            end)
+          else
+            config_constraints
+          end
+
         constraints_with_source =
           Ash.Type.include_source(
             config[:type],
             constraints[:__source__],
-            config_constraints
+            constraints_with_include_source
           )
 
         case Ash.Type.cast_input(
@@ -847,7 +906,7 @@ defmodule Ash.Type.Union do
         their_tag_value == tag_value || their_tag_value == to_string(tag_value)
 
       is_binary(tag_value) && is_atom(their_tag_value) ->
-        their_tag_value == tag_value || to_string(their_tag_value) == tag_value
+        to_string(their_tag_value) == tag_value
 
       true ->
         their_tag_value == tag_value
@@ -881,7 +940,43 @@ defmodule Ash.Type.Union do
   @impl true
   def cast_stored(nil, _), do: {:ok, nil}
 
+  # stored values are in the embedded format (see `dump_to_native/2`),
+  # so they are loaded with `cast_from_embedded`
   def cast_stored(value, constraints) when is_map(value) do
+    cast_union(value, constraints, &Ash.Type.cast_from_embedded/3)
+  end
+
+  def cast_stored(_, _), do: :error
+
+  @impl true
+  def dump_to_native(nil, _), do: {:ok, nil}
+
+  # the inner value is dumped with `dump_to_embedded` because the dumped map
+  # is JSON-encoded by data layers, and `dump_to_native` may produce values
+  # that are not JSON-safe (e.g. raw binaries for `:binary`/`:uuid_v7`)
+  def dump_to_native(%Ash.Union{value: value, type: type_name}, union_constraints) do
+    dump_union(value, type_name, union_constraints, &Ash.Type.dump_to_embedded/3)
+  end
+
+  @impl true
+  def dump_to_embedded(nil, _), do: {:ok, nil}
+
+  def dump_to_embedded(%Ash.Union{value: value, type: type_name}, union_constraints) do
+    dump_union(value, type_name, union_constraints, &Ash.Type.dump_to_embedded/3)
+  end
+
+  def dump_to_embedded(_, _), do: :error
+
+  @impl true
+  def cast_from_embedded(nil, _), do: {:ok, nil}
+
+  def cast_from_embedded(value, constraints) when is_map(value) do
+    cast_union(value, constraints, &Ash.Type.cast_from_embedded/3)
+  end
+
+  def cast_from_embedded(_, _), do: :error
+
+  defp cast_union(value, constraints, cast_fn) do
     types = constraints[:types] || []
 
     case constraints[:storage] do
@@ -897,13 +992,9 @@ defmodule Ash.Type.Union do
 
             case Keyword.fetch(types, type) do
               {:ok, config} ->
-                case Ash.Type.cast_stored(config[:type], value, config[:constraints]) do
+                case cast_fn.(config[:type], value, config[:constraints]) do
                   {:ok, casted_value} ->
-                    {:ok,
-                     %Ash.Union{
-                       value: casted_value,
-                       type: type
-                     }}
+                    {:ok, %Ash.Union{value: casted_value, type: type}}
 
                   other ->
                     other
@@ -931,13 +1022,9 @@ defmodule Ash.Type.Union do
             :error
 
           {type_name, config} ->
-            case Ash.Type.cast_stored(config[:type], value, config[:constraints]) do
+            case cast_fn.(config[:type], value, config[:constraints]) do
               {:ok, casted_value} ->
-                {:ok,
-                 %Ash.Union{
-                   value: casted_value,
-                   type: type_name
-                 }}
+                {:ok, %Ash.Union{value: casted_value, type: type_name}}
 
               other ->
                 other
@@ -946,12 +1033,7 @@ defmodule Ash.Type.Union do
     end
   end
 
-  def cast_stored(_, _), do: :error
-
-  @impl true
-  def dump_to_native(nil, _), do: {:ok, nil}
-
-  def dump_to_native(%Ash.Union{value: value, type: type_name}, union_constraints) do
+  defp dump_union(value, type_name, union_constraints, dump_fn) do
     type = union_constraints[:types][type_name][:type]
 
     if type do
@@ -959,7 +1041,7 @@ defmodule Ash.Type.Union do
 
       case union_constraints[:storage] do
         :type_and_value ->
-          case Ash.Type.dump_to_native(type, value, constraints) do
+          case dump_fn.(type, value, constraints) do
             {:ok, value} ->
               {:ok, %{"type" => type_name, "value" => value}}
 
@@ -974,7 +1056,7 @@ defmodule Ash.Type.Union do
             raise "Found a type without a tag when using the `:map_with_tag` storage constraint. Constraints: #{inspect(union_constraints)}"
           end
 
-          case Ash.Type.dump_to_native(
+          case dump_fn.(
                  type,
                  value,
                  constraints
@@ -1085,7 +1167,7 @@ defmodule Ash.Type.Union do
         end,
         fn
           %Ash.Union{value: value} = union ->
-            {:union_value, value, Map.get(union, :__index__)}
+            {:union_value, value, :maps.get(:__index__, union, nil)}
 
           other ->
             other
@@ -1134,6 +1216,15 @@ defmodule Ash.Type.Union do
           type_constraints =
             if union_tag = constraints[:types][name][:tag] do
               Keyword.put(type_constraints, :__union_tag__, union_tag)
+            else
+              type_constraints
+            end
+
+          type_constraints =
+            if Ash.Type.embedded_type?(type) do
+              Keyword.put_new_lazy(type_constraints, :include_source?, fn ->
+                Keyword.get(constraints, :include_source?, @include_source_by_default)
+              end)
             else
               type_constraints
             end

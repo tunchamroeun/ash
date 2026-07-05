@@ -339,6 +339,9 @@ defmodule Ash.Generator do
         input,
         Map.to_list(changeset_opts)
       )
+      |> Ash.Changeset.set_context(%{
+        private: %{generator_context: Map.get(changeset_opts, :context, %{})}
+      })
       |> then(fn changeset ->
         if opts[:after_action] do
           Ash.Changeset.after_action(changeset, fn _changeset, record ->
@@ -407,9 +410,9 @@ defmodule Ash.Generator do
     missing. Only applies to the tuple form `{Resource, attrs}`. Defaults to `true`.
   """
   @spec seed_generator(
-          Ash.Resource.record()
+          Ash.Resource.Record.t()
           | {Ash.Resource.t(), map()}
-          | (map -> Ash.Resource.record() | {Ash.Resource.t(), %{}}),
+          | (map -> Ash.Resource.Record.t() | {Ash.Resource.t(), %{}}),
           opts :: Keyword.t()
         ) :: stream_data()
   def seed_generator(record, opts \\ []) do
@@ -540,7 +543,7 @@ defmodule Ash.Generator do
   end
 
   @doc """
-  Generate globally unique values.
+  Generate sequential unique values.
 
   This is useful for generating values that are unique within a given test or processes that it spawns, such as email addresses,
   or for generating values that are unique across a single resource, such as identifiers. The values will be unique
@@ -551,7 +554,8 @@ defmodule Ash.Generator do
   > that will be the test. In the rare case where you are running async processes that need to share a sequence
   > that is not created in the test process, you can initialize a sequence in the test using `initialize_sequence/1`.
   >
-  > If you need a globally unique value, use a value like `System.unique_integer([:positive])` in your values instead.
+  > If you need a globally unique value, for example to satisfy a unique database constraint, use a value
+  > like `System.unique_integer([:positive])` instead.
   >
   > For example:
   >
@@ -769,9 +773,9 @@ defmodule Ash.Generator do
   @spec generate(
           stream_data()
           | Ash.Changeset.t()
-          | Ash.Resource.record()
+          | Ash.Resource.Record.t()
         ) ::
-          Ash.Resource.record()
+          Ash.Resource.Record.t()
   def generate(%Ash.Changeset{action_type: :create} = changeset) do
     Ash.create!(changeset)
   end
@@ -822,7 +826,8 @@ defmodule Ash.Generator do
           actor: first.context[:private][:actor],
           authorize?: first.context[:private][:authorize?],
           tenant: first.tenant,
-          tracer: first.context[:private][:tracer]
+          tracer: first.context[:private][:tracer],
+          context: first.context[:private][:generator_context] || %{}
         ]
 
         opts =
@@ -855,7 +860,7 @@ defmodule Ash.Generator do
   have to generate them yourself by passing your own generators/values down. See the module documentation for more.
   """
   @spec action_input(
-          Ash.Resource.t() | Ash.Resource.record(),
+          Ash.Resource.t() | Ash.Resource.Record.t(),
           action_name :: atom,
           generators :: overrides()
         ) :: map()

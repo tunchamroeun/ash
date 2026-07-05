@@ -24,8 +24,6 @@ defmodule Ash.Resource.Preparation do
     __spark_metadata__: nil
   ]
 
-  require Ash.BehaviourHelpers
-
   @type ref :: {module(), Keyword.t()} | module()
 
   @type t :: %__MODULE__{
@@ -127,7 +125,7 @@ defmodule Ash.Resource.Preparation do
     defstruct [:actor, :tenant, :authorize?, :tracer, source_context: %{}]
 
     @type t :: %__MODULE__{
-            actor: Ash.Resource.record() | nil,
+            actor: Ash.Resource.Record.t() | nil,
             tenant: term(),
             authorize?: boolean() | nil,
             source_context: map(),
