@@ -169,9 +169,14 @@ defmodule Ash.Actions.Create.Bulk do
 
         batch_size =
           cond do
-            action.manual != nil and manual_action_can_bulk? -> opts[:batch_size] || 100
-            action.manual == nil and data_layer_can_bulk? -> opts[:batch_size] || 100
-            true -> 1
+            action.manual != nil and manual_action_can_bulk? ->
+              opts[:batch_size] || 100
+
+            action.manual == nil and data_layer_can_bulk? ->
+              opts[:batch_size] || Ash.DataLayer.default_bulk_batch_size(resource, action) || 100
+
+            true ->
+              1
           end
 
         all_changes =
@@ -1746,10 +1751,15 @@ defmodule Ash.Actions.Create.Bulk do
             resource |> Ash.Resource.Info.public_attributes() |> Enum.map(& &1.name)
           end
 
+        load_context =
+          (opts[:context] || %{})
+          |> Map.take([:shared])
+          |> Map.put(:private, %{just_created_by_action: action.name})
+
         case Ash.load(
                records,
                select,
-               context: %{private: %{just_created_by_action: action.name}},
+               context: load_context,
                reuse_values?: true,
                domain: domain,
                action: Ash.Resource.Info.primary_action(resource, :read) || action,
@@ -1769,7 +1779,7 @@ defmodule Ash.Actions.Create.Bulk do
             Ash.load(
               records,
               load_query,
-              context: %{private: %{just_created_by_action: action.name}},
+              context: load_context,
               domain: domain,
               tenant: opts[:tenant],
               action: Ash.Resource.Info.primary_action(resource, :read) || action,

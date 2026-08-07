@@ -1522,7 +1522,7 @@ defmodule Ash.Filter do
     if query.__validated_for_action__ == action do
       query
     else
-      Ash.Query.for_read(query, action, %{},
+      Ash.Query.for_read(query, action, relationship_read_action_arguments(relationship),
         actor: actor,
         authorize?: true,
         tenant: tenant,
@@ -1530,6 +1530,10 @@ defmodule Ash.Filter do
         context: source_context
       )
     end
+  end
+
+  defp relationship_read_action_arguments(relationship) do
+    Map.get(relationship, :read_action_arguments, %{})
   end
 
   defp group_refs_by_all_paths(paths_with_refs) do
@@ -1789,6 +1793,45 @@ defmodule Ash.Filter do
               )
         }
 
+      %Ref{attribute: %Calculation{module: module, opts: opts, context: context} = calc} = ref ->
+        if Ash.Resource.Calculation.has_expression?(module) do
+          expr =
+            module
+            |> Ash.Resource.Calculation.expression(opts, context)
+            |> Ash.Expr.fill_template(
+              actor: context.actor,
+              tenant: context.tenant,
+              args: context.arguments,
+              context: context.source_context
+            )
+
+          case hydrate_refs(expr, %{resource: ref.resource, public?: false}) do
+            {:ok, expr} ->
+              new_expr =
+                update_aggregates(
+                  expr,
+                  resource,
+                  mapper,
+                  nested_path ++ ref.relationship_path,
+                  parent_paths
+                )
+
+              %{
+                ref
+                | attribute: %{
+                    calc
+                    | module: Ash.Resource.Calculation.Expression,
+                      opts: [expr: new_expr]
+                  }
+              }
+
+            _ ->
+              ref
+          end
+        else
+          ref
+        end
+
       other ->
         other
     end
@@ -1846,6 +1889,10 @@ defmodule Ash.Filter do
         expr =
           move_to_relationship_path(expr, Enum.drop(at_path ++ path, Enum.count(shortest_path)))
 
+        read_action =
+          relationship.read_action ||
+            Ash.Resource.Info.primary_action!(relationship.destination, :read).name
+
         query =
           related
           |> Ash.Query.do_filter(expr)
@@ -1853,8 +1900,9 @@ defmodule Ash.Filter do
           |> Ash.Query.set_tenant(tenant)
           |> Map.put(:domain, domain)
           |> Ash.Query.set_context(%{private: %{internal?: true}})
+          |> Ash.Query.for_read(read_action, relationship_read_action_arguments(relationship))
 
-        case Ash.Actions.Read.unpaginated_read(query, relationship.read_action, authorize?: false) do
+        case Ash.Actions.Read.unpaginated_read(query, nil, authorize?: false) do
           {:ok, data} ->
             records_to_expression(data, relationship, :lists.droplast(shortest_path))
 
@@ -2047,7 +2095,12 @@ defmodule Ash.Filter do
       |> Ash.Query.sort(relationship.sort, prepend?: true)
       |> Ash.Query.set_context(relationship.context)
       |> Ash.Query.set_context(%{private: %{internal?: true}})
-      |> Ash.Actions.Read.unpaginated_read(relationship.read_action, authorize?: false)
+      |> Ash.Query.for_read(
+        relationship.read_action ||
+          Ash.Resource.Info.primary_action!(relationship.destination, :read).name,
+        relationship_read_action_arguments(relationship)
+      )
+      |> Ash.Actions.Read.unpaginated_read(nil, authorize?: false)
       |> case do
         {:ok, results} ->
           relationship.through
@@ -2099,9 +2152,16 @@ defmodule Ash.Filter do
          _domain,
          tenant
        ) do
-    query = Ash.Query.set_tenant(query, tenant)
+    query =
+      query
+      |> Ash.Query.set_tenant(tenant)
+      |> Ash.Query.for_read(
+        relationship.read_action ||
+          Ash.Resource.Info.primary_action!(relationship.destination, :read).name,
+        relationship_read_action_arguments(relationship)
+      )
 
-    case Ash.Actions.Read.unpaginated_read(query, query.action, authorize?: false) do
+    case Ash.Actions.Read.unpaginated_read(query, nil, authorize?: false) do
       {:ok, data} ->
         records_to_expression(
           data,

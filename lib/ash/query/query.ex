@@ -540,7 +540,31 @@ defmodule Ash.Query do
   def combination_of(query, combinations) do
     query = new(query)
 
-    %{query | combination_of: query.combination_of ++ List.wrap(combinations)}
+    query = %{query | combination_of: query.combination_of ++ List.wrap(combinations)}
+
+    # A `^combinations(...)` reference can only be hydrated once the
+    # combinations are known, so a filter built before this call still carries
+    # the bare field name. Hydrate it now that they are known — otherwise the
+    # reference stays unresolvable and every record is filtered out.
+    case query.filter do
+      nil ->
+        query
+
+      filter ->
+        case Ash.Filter.hydrate_refs(filter, combination_hydration_context(query)) do
+          {:ok, hydrated} -> %{query | filter: hydrated}
+          {:error, error} -> add_error(query, :filter, error)
+        end
+    end
+  end
+
+  @doc false
+  def combination_hydration_context(query) do
+    %{
+      resource: query.resource,
+      public?: false,
+      first_combination: Enum.at(query.combination_of, 0)
+    }
   end
 
   @doc """
@@ -1694,7 +1718,7 @@ defmodule Ash.Query do
   Determines if the filter statement of a query is equivalent to the provided expression.
 
   This uses the satisfiability solver that is used when solving for policy authorizations. In complex scenarios, or when using
-  custom database expressions, (like fragments in ash_postgres), this function may return `:maybe`. Use `supserset_of?` to always return
+  custom database expressions, (like fragments in ash_postgres), this function may return `:maybe`. Use `superset_of?` to always return
   a boolean.
   """
   defmacro equivalent_to(query, expr) do
@@ -1730,7 +1754,7 @@ defmodule Ash.Query do
   Determines if the provided expression would return data that is a subset of the data returned by the filter on the query.
 
   This uses the satisfiability solver that is used when solving for policy authorizations. In complex scenarios, or when using
-  custom database expressions, (like fragments in ash_postgres), this function may return `:maybe`. Use `supserset_of?` to always return
+  custom database expressions, (like fragments in ash_postgres), this function may return `:maybe`. Use `superset_of?` to always return
   a boolean.
   """
   defmacro superset_of(query, expr) do
@@ -3971,7 +3995,8 @@ defmodule Ash.Query do
                  filter,
                  %{
                    resource: query.resource,
-                   public?: false
+                   public?: false,
+                   first_combination: Enum.at(query.combination_of, 0)
                  }
                  |> with_parent_stack(opts)
                  |> with_conflicting_upsert_values(opts)
@@ -4027,7 +4052,8 @@ defmodule Ash.Query do
                  filter,
                  %{
                    resource: query.resource,
-                   public?: false
+                   public?: false,
+                   first_combination: Enum.at(query.combination_of, 0)
                  }
                  |> with_parent_stack(opts)
                  |> with_conflicting_upsert_values(opts)
@@ -4574,7 +4600,8 @@ defmodule Ash.Query do
                  combination_of_queries?: true,
                  combination_fieldset:
                    Enum.uniq(
-                     (combination.select || default_select) ++ Map.keys(combination.calculations)
+                     selected_fields(ash_query.resource, combination.select || default_select) ++
+                       Map.keys(combination.calculations)
                    )
                }}
             end
@@ -4587,6 +4614,16 @@ defmodule Ash.Query do
         {:ok, opts[:initial_query] || Ash.DataLayer.resource_to_query(ash_query.resource, domain),
          %{}}
     end
+  end
+
+  # The fieldset must describe what each combination query selects, and `select/3`
+  # decides that — it always adds the primary key and any always-selected
+  # attributes to whatever was asked for.
+  defp selected_fields(resource, select) do
+    resource
+    |> new()
+    |> select(select, replace?: true)
+    |> Map.fetch!(:select)
   end
 
   defp combination_queries(query) do
